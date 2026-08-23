@@ -50,7 +50,7 @@ def read_events(path: str | os.PathLike) -> tuple[list[Event], list[ParseError]]
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError as exc:
-                errors.append(ParseError(line_no, f"JSON 解析失败: {exc.msg}", line))
+                errors.append(ParseError(line_no, f"JSON 格式不合法: {exc.msg}", line))
                 continue
             if not isinstance(obj, dict):
                 errors.append(ParseError(line_no, "顶层不是对象", line))

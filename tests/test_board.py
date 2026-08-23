@@ -14,7 +14,10 @@ def test_unreflected_surprise_is_pinned_above_the_batch_sections(make_events):
 def test_no_failure_language_anywhere(make_events):
     batches, warnings = project(make_events(prediction=0.830, actual=0.950))
 
-    output = render_markdown(batches, warnings, parse_errors=[])
+    # 含坏行报告一起检查：措辞要求覆盖看板的每一个角落
+    output = render_markdown(
+        batches, warnings, parse_errors=[ParseError(7, "JSON 格式不合法", "{ bad")]
+    )
 
     for word in ("失败", "错误", "不及格", "糟糕"):
         assert word not in output
