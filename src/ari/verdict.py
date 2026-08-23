@@ -83,3 +83,44 @@ def judge_metric(prediction, agg: Aggregate, spec) -> MetricJudgement:
         return MetricJudgement(Verdict.NOISY, agg.mean - point, tolerance, tolerance, blocked)
     verdict = Verdict.CONFIRMED if abs(agg.mean - point) <= tolerance else Verdict.SURPRISE
     return MetricJudgement(verdict, agg.mean - point, tolerance, tolerance)
+
+
+# 从最坏到最好。run 级取最坏：只有全部指标 CONFIRMED，run 才 CONFIRMED。
+_WORST_FIRST = (
+    Verdict.SURPRISE,
+    Verdict.NOISY,
+    Verdict.UNVERIFIED,
+    Verdict.NO_RESULT,
+    Verdict.CONFIRMED,
+)
+
+
+def worst(verdicts) -> Verdict:
+    for candidate in _WORST_FIRST:
+        if candidate in verdicts:
+            return candidate
+    return Verdict.CONFIRMED
+
+
+def judge_run(
+    prediction_metrics: dict,
+    results: dict[str, Aggregate],
+    specs: dict,
+) -> tuple[Verdict, dict[str, MetricJudgement]]:
+    """判定一个 run 的所有指标并取最坏。
+
+    返回 (run 级 verdict, 每个指标的判定明细)。明细必须保留——review 时
+    要点名是哪个指标偏了多少，而不是笼统地说这个 run 不符预期。
+    """
+    if not prediction_metrics:
+        return Verdict.NO_RESULT, {}
+
+    per_metric: dict[str, MetricJudgement] = {}
+    for name, prediction in prediction_metrics.items():
+        agg = results.get(name)
+        if agg is None:
+            per_metric[name] = MetricJudgement(Verdict.NO_RESULT, None, None, 0.0, "尚无结果")
+        else:
+            per_metric[name] = judge_metric(prediction, agg, specs[name])
+
+    return worst({j.verdict for j in per_metric.values()}), per_metric

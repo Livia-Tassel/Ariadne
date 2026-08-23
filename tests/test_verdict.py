@@ -1,7 +1,7 @@
 import pytest
 
 from ari.metrics import MetricSpec
-from ari.verdict import Verdict, aggregate, judge_metric
+from ari.verdict import Verdict, aggregate, judge_metric, judge_run, worst
 
 ACC = MetricSpec("higher_better", "absolute", 0.005)
 LOSS = MetricSpec("lower_better", "relative", 0.10)
@@ -95,3 +95,49 @@ def test_judgement_carries_deviation_for_display():
     judgement = judge_metric(0.800, aggregate([0.850]), ACC)
     assert judgement.deviation == pytest.approx(0.050)
     assert judgement.threshold == pytest.approx(0.005)
+
+
+def test_worst_of_picks_surprise_over_everything():
+    assert worst({Verdict.CONFIRMED, Verdict.NOISY, Verdict.SURPRISE}) is Verdict.SURPRISE
+
+
+def test_worst_of_prefers_noisy_over_no_result():
+    assert worst({Verdict.CONFIRMED, Verdict.NO_RESULT, Verdict.NOISY}) is Verdict.NOISY
+
+
+def test_all_confirmed_gives_confirmed():
+    assert worst({Verdict.CONFIRMED}) is Verdict.CONFIRMED
+
+
+def test_empty_set_is_confirmed():
+    assert worst(set()) is Verdict.CONFIRMED
+
+
+def test_run_is_surprise_if_any_metric_is():
+    verdict, per_metric = judge_run(
+        prediction_metrics={"top1_acc": 0.830, "train_loss": 0.31},
+        results={"top1_acc": aggregate([0.831]), "train_loss": aggregate([0.60])},
+        specs={"top1_acc": ACC, "train_loss": LOSS},
+    )
+
+    assert verdict is Verdict.SURPRISE
+    assert per_metric["top1_acc"].verdict is Verdict.CONFIRMED
+    assert per_metric["train_loss"].verdict is Verdict.SURPRISE
+
+
+def test_metric_without_result_is_no_result_and_blocks_confirmed():
+    verdict, per_metric = judge_run(
+        prediction_metrics={"top1_acc": 0.830, "train_loss": 0.31},
+        results={"top1_acc": aggregate([0.831])},
+        specs={"top1_acc": ACC, "train_loss": LOSS},
+    )
+
+    assert verdict is Verdict.NO_RESULT
+    assert per_metric["train_loss"].verdict is Verdict.NO_RESULT
+
+
+def test_run_without_any_prediction_is_no_result():
+    verdict, per_metric = judge_run({}, {}, {})
+
+    assert verdict is Verdict.NO_RESULT
+    assert per_metric == {}
