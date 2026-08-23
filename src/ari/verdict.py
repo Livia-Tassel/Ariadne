@@ -124,3 +124,51 @@ def judge_run(
             per_metric[name] = judge_metric(prediction, agg, specs[name])
 
     return worst({j.verdict for j in per_metric.values()}), per_metric
+
+
+@dataclass(frozen=True)
+class RankingJudgement:
+    verdict: Verdict
+    real_flips: list[tuple[str, str]]
+    noisy_flips: list[tuple[str, str]]
+
+
+def judge_ranking(
+    expected_order: list[str],
+    aggregates: dict[str, Aggregate],
+    spec,
+) -> RankingJudgement:
+    """判定 batch 级的相对排序预测。
+
+    遍历 expected_order 中所有有序对 (a, b)——a 应优于 b。实测中 a 未优于
+    b 即为一次翻转；差值落在噪声内记为 noisy 翻转，否则记为 real 翻转。
+    """
+    order = [run for run in expected_order if run in aggregates]
+    if len(order) < 2:
+        return RankingJudgement(Verdict.NO_RESULT, [], [])
+
+    is_better = (
+        (lambda x, y: x > y) if spec.direction == "higher_better" else (lambda x, y: x < y)
+    )
+    real_flips: list[tuple[str, str]] = []
+    noisy_flips: list[tuple[str, str]] = []
+
+    for i, better_run in enumerate(order):
+        for worse_run in order[i + 1 :]:
+            mean_a = aggregates[better_run].mean
+            mean_b = aggregates[worse_run].mean
+            if is_better(mean_a, mean_b):
+                continue
+            noise = 2 * max(
+                aggregates[better_run].sd or 0.0, aggregates[worse_run].sd or 0.0
+            )
+            if abs(mean_a - mean_b) <= noise:
+                noisy_flips.append((better_run, worse_run))
+            else:
+                real_flips.append((better_run, worse_run))
+
+    if real_flips:
+        return RankingJudgement(Verdict.SURPRISE, real_flips, noisy_flips)
+    if noisy_flips:
+        return RankingJudgement(Verdict.NOISY, [], noisy_flips)
+    return RankingJudgement(Verdict.CONFIRMED, [], [])

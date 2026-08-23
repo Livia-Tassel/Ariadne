@@ -1,7 +1,14 @@
 import pytest
 
 from ari.metrics import MetricSpec
-from ari.verdict import Verdict, aggregate, judge_metric, judge_run, worst
+from ari.verdict import (
+    Verdict,
+    aggregate,
+    judge_metric,
+    judge_ranking,
+    judge_run,
+    worst,
+)
 
 ACC = MetricSpec("higher_better", "absolute", 0.005)
 LOSS = MetricSpec("lower_better", "relative", 0.10)
@@ -141,3 +148,81 @@ def test_run_without_any_prediction_is_no_result():
 
     assert verdict is Verdict.NO_RESULT
     assert per_metric == {}
+
+
+def test_ranking_matching_expectation_is_confirmed():
+    judgement = judge_ranking(
+        expected_order=["model=large", "model=base"],
+        aggregates={"model=large": aggregate([0.85]), "model=base": aggregate([0.80])},
+        spec=ACC,
+    )
+
+    assert judgement.verdict is Verdict.CONFIRMED
+    assert judgement.real_flips == []
+
+
+def test_clear_flip_is_surprise_and_names_the_pair():
+    judgement = judge_ranking(
+        expected_order=["model=large", "model=base"],
+        aggregates={"model=large": aggregate([0.75]), "model=base": aggregate([0.85])},
+        spec=ACC,
+    )
+
+    assert judgement.verdict is Verdict.SURPRISE
+    assert judgement.real_flips == [("model=large", "model=base")]
+
+
+def test_lower_better_metric_inverts_the_comparison():
+    judgement = judge_ranking(
+        expected_order=["model=large", "model=base"],
+        aggregates={"model=large": aggregate([0.20]), "model=base": aggregate([0.50])},
+        spec=LOSS,
+    )
+
+    assert judgement.verdict is Verdict.CONFIRMED
+
+
+def test_flip_inside_noise_is_noisy_not_surprise():
+    judgement = judge_ranking(
+        expected_order=["model=large", "model=base"],
+        aggregates={
+            "model=large": aggregate([0.820, 0.830, 0.840]),  # mean 0.830, 2σ=0.020
+            "model=base": aggregate([0.835]),
+        },
+        spec=ACC,
+    )
+
+    assert judgement.verdict is Verdict.NOISY
+    assert judgement.noisy_flips == [("model=large", "model=base")]
+
+
+def test_tie_counts_as_noisy_flip():
+    judgement = judge_ranking(
+        expected_order=["a", "b"],
+        aggregates={"a": aggregate([0.80]), "b": aggregate([0.80])},
+        spec=ACC,
+    )
+
+    assert judgement.verdict is Verdict.NOISY
+
+
+def test_real_flip_outranks_noisy_flip():
+    judgement = judge_ranking(
+        expected_order=["a", "b", "c"],
+        aggregates={"a": aggregate([0.80]), "b": aggregate([0.80]), "c": aggregate([0.95])},
+        spec=ACC,
+    )
+
+    assert judgement.verdict is Verdict.SURPRISE
+    assert ("a", "c") in judgement.real_flips
+    assert ("a", "b") in judgement.noisy_flips
+
+
+def test_missing_runs_are_dropped_and_too_few_gives_no_result():
+    judgement = judge_ranking(
+        expected_order=["a", "b"],
+        aggregates={"a": aggregate([0.80])},
+        spec=ACC,
+    )
+
+    assert judgement.verdict is Verdict.NO_RESULT
