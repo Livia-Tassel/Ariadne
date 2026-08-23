@@ -21,7 +21,6 @@ _VERDICT_LABEL = {
     Verdict.UNVERIFIED: "UNVERIFIED 待人工确认",
 }
 
-
 def _format_actual(agg) -> str:
     if agg is None:
         return "—"
@@ -86,42 +85,14 @@ def _render_batch(batch: BatchState) -> list[str]:
     status = "已收口" if batch.closed else "进行中"
     lines = [f"## 批次 {batch.id}（{status}）", ""]
     if batch.hypothesis:
-        lines += [f"**假设：**{batch.hypothesis}", ""]
+        # 粗体标记后必须留空格，否则紧邻 CJK 时 markdown 不识别
+        lines += [f"**假设：** {batch.hypothesis}", ""]
 
-    lines += ["| run | 指标 | 预测 | 实测 | 判定 | 复盘 |", "|---|---|---|---|---|---|"]
     for key, run in batch.runs.items():
-        label = f"`{key}`" + ("（已修订）" if run.revised else "")
-        metrics = (run.prediction or {}).get("metrics", {})
-        if not metrics:
-            lines.append(f"| {label} | — | — | — | {_VERDICT_LABEL[run.verdict]} | — |")
-            continue
-        for i, (name, predicted) in enumerate(metrics.items()):
-            judgement = run.metric_judgements.get(name)
-            verdict = judgement.verdict if judgement else run.verdict
-            closure = "✓" if run.closed else ("待复盘" if verdict is Verdict.SURPRISE else "—")
-            lines.append(
-                f"| {label if i == 0 else ''} | {name} | {_format_prediction(predicted)} "
-                f"| {_format_actual(run.aggregates.get(name))} | {_VERDICT_LABEL[verdict]} "
-                f"| {closure} |"
-            )
-    lines.append("")
-
-    for run in batch.runs.values():
-        for judgement in run.metric_judgements.values():
-            if judgement.verdict is Verdict.NOISY:
-                lines += [f"- `{run.run}`：{judgement.note}", ""]
-                break
-        if "result_predates_prediction" in run.integrity:
-            lines += [
-                f"- ⚠ `{run.run}`：结果文件的修改时间早于预测写入时间（预测晚于结果），"
-                f"请确认这不是补记的预测",
-                "",
-            ]
-        for warning in run.warnings:
-            lines += [f"- `{run.run}`：{warning}", ""]
+        lines += _render_run(run, key)
 
     if batch.ranking is not None:
-        lines += [f"**排序预测：**{_VERDICT_LABEL[batch.ranking.verdict]}", ""]
+        lines += [f"**排序预测：** {_VERDICT_LABEL[batch.ranking.verdict]}", ""]
         for better, worse in batch.ranking.real_flips:
             lines.append(f"- 预期 `{better}` 优于 `{worse}`，实测相反")
         for better, worse in batch.ranking.noisy_flips:
@@ -132,5 +103,54 @@ def _render_batch(batch: BatchState) -> list[str]:
         lines += [f"> {batch.info_signal}", ""]
     for warning in batch.warnings:
         lines += [f"- {warning}", ""]
+
+    return lines
+
+
+def _render_run(run, key: str) -> list[str]:
+    """一个 run 一块。
+
+    早先用过单张大表把所有 run 挤在一起，80 列终端下 run key 会被截断成
+    `lr=0.0001,mo…`——而 run key 恰恰是区分 run 的唯一信息。按 run 分块后
+    每张表只有四列，放得下。
+    """
+    marks = []
+    if run.revised:
+        marks.append("已修订")
+    if run.closed:
+        marks.append("已复盘")
+    elif run.verdict is Verdict.SURPRISE:
+        marks.append("待复盘")
+    suffix = f"（{'、'.join(marks)}）" if marks else ""
+
+    lines = [f"### `{key}` · {_VERDICT_LABEL[run.verdict]}{suffix}", ""]
+
+    metrics = (run.prediction or {}).get("metrics", {})
+    if not metrics:
+        lines += ["尚无预测。", ""]
+        return lines
+
+    lines += ["| 指标 | 预测 | 实测 | 判定 |", "|---|---|---|---|"]
+    for name, predicted in metrics.items():
+        judgement = run.metric_judgements.get(name)
+        verdict = judgement.verdict if judgement else run.verdict
+        lines.append(
+            f"| {name} | {_format_prediction(predicted)} "
+            f"| {_format_actual(run.aggregates.get(name))} | {verdict.value} |"
+        )
+    lines.append("")
+
+    for judgement in run.metric_judgements.values():
+        if judgement.verdict is Verdict.NOISY:
+            lines += [judgement.note, ""]
+            break
+    if "result_predates_prediction" in run.integrity:
+        lines += [
+            "⚠ 结果文件的修改时间早于预测写入时间（预测晚于结果），"
+            "请确认这不是补记的预测",
+            "",
+        ]
+    for warning in run.warnings:
+        lines += [warning, ""]
 
     return lines

@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from rich.console import Console
+from rich.markdown import Markdown
+
+from .board import render_markdown
+from .events import read_events
+from .project import project as project_events
 
 app = typer.Typer(add_completion=False, help="实验预测、记录与复盘闭环")
 
@@ -51,3 +57,20 @@ def init(path: str = typer.Argument(..., help="项目目录")) -> None:
 
     typer.echo(f"已初始化 {project}")
     typer.echo("下一步：ari plan 开启第一个批次（尚未实现，当前可手写 runs.jsonl 后 ari board）")
+
+
+@app.command()
+def board(
+    project_dir: str = typer.Option(".", "--project", "-p", help="项目目录"),
+    write: bool = typer.Option(True, help="同时写出 board.md"),
+) -> None:
+    """渲染看板。board.md 是派生产物，可随时重新生成。"""
+    root = Path(project_dir)
+    events, parse_errors = read_events(root / "runs.jsonl")
+    batches, warnings = project_events(events)
+    markdown = render_markdown(batches, warnings, parse_errors)
+
+    if write:
+        (root / "board.md").write_text(markdown, encoding="utf-8")
+
+    Console().print(Markdown(markdown))
