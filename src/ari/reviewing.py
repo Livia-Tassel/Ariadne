@@ -17,6 +17,8 @@ import re
 
 import yaml
 
+from .beliefs import make_belief_id, normalize_text
+from .events import Event
 from .verdict import Verdict
 
 _CAUSE_PLACEHOLDER = "<为什么会这样？>"
@@ -209,3 +211,40 @@ next:  <下一批打算验证什么？可以留空>\
 
 def build_batch_draft(batch_id: str, ledger: dict | None = None) -> str:
     return BATCH_DRAFT.format(batch_id=batch_id) + "\n".join(_belief_section(ledger)) + "\n"
+
+
+def build_reflection_events(
+    parsed: dict, batch: str, run: str | None, ledger: dict | None, now: str
+) -> list[Event]:
+    """一份复盘草稿 → reflection + 若干 belief_* 事件。ts 由调用方注入。
+
+    信念的增减是独立事件（spec §3.1），不塞进 reflection 的 payload：同一条
+    信念会被多次复盘引用，塞进 payload 就得翻遍所有 reflection 才能拼出账本。
+    事件自带的 batch / run 已经记下了它出自哪次复盘。
+    """
+    payload = {key: parsed[key] for key in ("scope", "cause", "next")}
+    events = [Event(ts=now, type="reflection", batch=batch, run=run, payload=payload)]
+
+    known = {bid: belief.text for bid, belief in (ledger or {}).items()}
+    for text in parsed.get("beliefs_added") or []:
+        belief_id = make_belief_id(text, known)
+        held = known.get(belief_id)
+        if held is not None and normalize_text(held) == normalize_text(text):
+            continue  # 账本里已经有这一条，不重复记
+        known[belief_id] = text
+        events.append(
+            Event(
+                ts=now,
+                type="belief_added",
+                batch=batch,
+                run=run,
+                payload={"id": belief_id, "text": text},
+            )
+        )
+
+    for belief_id, kind in (parsed.get("belief_changes") or {}).items():
+        events.append(
+            Event(ts=now, type=kind, batch=batch, run=run, payload={"id": belief_id})
+        )
+
+    return events

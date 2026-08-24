@@ -177,3 +177,63 @@ def test_review_without_any_batch_is_a_friendly_error(tmp_path):
 
     assert result.exit_code != 0
     assert "plan" in result.output
+
+
+REFLECTION_WITH_BELIEF = (
+    "cause: 数据增强没关\nnext: 关掉重跑\nbeliefs_added:\n  - 增强对小数据集有害\n"
+)
+
+
+def test_review_writes_belief_events(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(REFLECTION_WITH_BELIEF))
+
+    result = runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    assert result.exit_code == 0
+    events, _ = read_events(project / "runs.jsonl")
+    added = [e for e in events if e.type == "belief_added"]
+    assert len(added) == 1
+    assert added[0].payload["text"] == "增强对小数据集有害"
+    assert added[0].run == "model=large"
+    reflection = [e for e in events if e.type == "reflection"][0]
+    assert "beliefs_added" not in reflection.payload
+
+
+def test_second_run_sees_the_belief_written_while_reviewing_the_first(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path, second_run=True)
+    editor = FakeEditor(REFLECTION_WITH_BELIEF, REFLECTION)
+    monkeypatch.setattr(cli, "edit_text", editor)
+
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    # 第二个 run 的草稿里应当已经列出刚写下的那条信念
+    assert "增强对小数据集有害" in editor.seen[1]
+
+
+def test_reviewing_the_same_belief_twice_does_not_duplicate_it(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path, second_run=True)
+    monkeypatch.setattr(
+        cli, "edit_text", FakeEditor(REFLECTION_WITH_BELIEF, REFLECTION_WITH_BELIEF)
+    )
+
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    events, _ = read_events(project / "runs.jsonl")
+    assert len([e for e in events if e.type == "belief_added"]) == 1
+
+
+def test_batch_closure_can_also_record_a_belief(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "edit_text",
+        FakeEditor(REFLECTION, "cause: 整体结论\nbeliefs_added:\n  - 批次级信念\n"),
+    )
+
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="y\n")
+
+    events, _ = read_events(project / "runs.jsonl")
+    added = [e for e in events if e.type == "belief_added"]
+    assert [e.payload["text"] for e in added] == ["批次级信念"]
+    assert added[0].run is None

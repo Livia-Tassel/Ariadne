@@ -32,6 +32,7 @@ from .project import project as project_events
 from .reviewing import (
     build_batch_draft,
     build_reflection_draft,
+    build_reflection_events,
     parse_reflection,
     pending,
 )
@@ -365,26 +366,31 @@ def review(
         typer.echo("这个项目还没有批次。先运行 ari plan 开一个。", err=True)
         raise typer.Exit(code=1)
 
+    ledger, _ = project_beliefs(events)
     queue = pending(batches)
     if queue:
         typer.echo(f"有 {len(queue)} 个 SURPRISE 待复盘。")
     else:
         typer.echo("没有待复盘的 SURPRISE——这一批要么全部符合预期，要么属于噪声，先补 seed。")
 
+    def _write(parsed, batch_id: str, run_key: str | None) -> None:
+        """写事件并把刚写下的信念并进账本，让后续草稿看得到。"""
+        nonlocal events, ledger
+        new = build_reflection_events(parsed, batch_id, run_key, ledger, _now())
+        for event in new:
+            append_event(runs_path, event)
+        events = events + new
+        ledger, _ = project_beliefs(events)
+
     try:
         for run in queue:
-            payload = _edit_reflection(
-                build_reflection_draft(run), scope="run", name=f"review-{run.run}"
+            parsed = _edit_reflection(
+                build_reflection_draft(run, ledger), scope="run", name=f"review-{run.run}"
             )
-            if payload is None:
+            if parsed is None:
                 typer.echo(f"跳过 {run.run}。")
                 continue
-            append_event(
-                runs_path,
-                Event(
-                    ts=_now(), type="reflection", batch=run.batch, run=run.run, payload=payload
-                ),
-            )
+            _write(parsed, run.batch, run.run)
             typer.echo(f"已记录 {run.run} 的复盘。")
     except EditorUnavailable as exc:
         typer.echo(str(exc), err=True)
@@ -394,14 +400,11 @@ def review(
     if not typer.confirm(f"给批次 {batch.id} 写一句整体收口？", default=False):
         return
 
-    payload = _edit_reflection(
-        build_batch_draft(batch.id), scope="batch", name=f"review-{batch.id}-close"
+    parsed = _edit_reflection(
+        build_batch_draft(batch.id, ledger), scope="batch", name=f"review-{batch.id}-close"
     )
-    if payload is None:
+    if parsed is None:
         typer.echo("没有写收口，批次保持进行中。")
         return
-    append_event(
-        runs_path,
-        Event(ts=_now(), type="reflection", batch=batch.id, payload=payload),
-    )
+    _write(parsed, batch.id, None)
     typer.echo(f"批次 {batch.id} 已收口。")

@@ -7,6 +7,7 @@ from ari.project import project
 from ari.reviewing import (
     build_batch_draft,
     build_reflection_draft,
+    build_reflection_events,
     parse_reflection,
     pending,
 )
@@ -218,3 +219,58 @@ def test_any_untouched_angle_bracket_placeholder_counts_as_blank():
 
 def test_untouched_next_placeholder_becomes_blank():
     assert parse_reflection("cause: 真的原因\nnext: <随便写点什么>\n")["next"] == ""
+
+
+NOW = "2026-08-24T15:00:00+08:00"
+
+
+def test_reflection_payload_carries_no_belief_keys():
+    parsed = parse_reflection("cause: 增强没关\nbeliefs_added:\n  - 新信念\n")
+
+    events = build_reflection_events(parsed, "b1", "model=large", {}, NOW)
+
+    assert events[0].type == "reflection"
+    assert set(events[0].payload) == {"scope", "cause", "next"}
+
+
+def test_added_belief_becomes_its_own_event_with_provenance():
+    parsed = parse_reflection("cause: 增强没关\nbeliefs_added:\n  - 大模型吃不下小 lr\n")
+
+    events = build_reflection_events(parsed, "b1", "model=large", {}, NOW)
+
+    added = [e for e in events if e.type == "belief_added"]
+    assert len(added) == 1
+    assert added[0].payload["text"] == "大模型吃不下小 lr"
+    assert added[0].payload["id"].startswith("bel-")
+    assert (added[0].batch, added[0].run) == ("b1", "model=large")
+    assert added[0].ts == NOW
+
+
+def test_belief_already_in_the_ledger_is_not_added_twice():
+    ledger = _ledger("大模型吃不下小 lr")
+    text = ledger["bel-0000"].text
+    parsed = parse_reflection(f"cause: 增强没关\nbeliefs_added:\n  - {text}\n")
+    # 账本里那条的 ID 是测试造的，重算一次才对得上
+    ledger = {make_belief_id(text): ledger["bel-0000"]}
+
+    events = build_reflection_events(parsed, "b1", "model=large", ledger, NOW)
+
+    assert [e.type for e in events] == ["reflection"]
+
+
+def test_the_same_belief_twice_in_one_draft_is_added_once():
+    parsed = parse_reflection("cause: x\nbeliefs_added:\n  - 同一条\n  - 同一条\n")
+
+    events = build_reflection_events(parsed, "b1", None, {}, NOW)
+
+    assert len([e for e in events if e.type == "belief_added"]) == 1
+
+
+def test_changes_become_belief_events():
+    parsed = parse_reflection("cause: x\nbeliefs:\n  bel-0000: refuted\n")
+
+    events = build_reflection_events(parsed, "b1", "model=large", _ledger("x"), NOW)
+
+    assert [e.type for e in events] == ["reflection", "belief_refuted"]
+    assert events[1].payload["id"] == "bel-0000"
+    assert events[1].batch == "b1"
