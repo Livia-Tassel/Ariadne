@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
 
+from .beliefs import project_beliefs
+from .beliefs import render_markdown as render_beliefs
 from .board import render_markdown
 from .drafts import with_errors
 from .editor import EditorUnavailable, edit_text
@@ -84,18 +86,24 @@ def init(path: str = typer.Argument(..., help="项目目录")) -> None:
 @app.command()
 def board(
     project_dir: str = typer.Option(".", "--project", "-p", help="项目目录"),
-    write: bool = typer.Option(True, help="同时写出 board.md"),
+    write: bool = typer.Option(True, help="同时写出 board.md 与 beliefs.md"),
 ) -> None:
-    """渲染看板。board.md 是派生产物，可随时重新生成。"""
+    """渲染看板。board.md 与 beliefs.md 都是派生产物，可随时重新生成。"""
     root = Path(project_dir)
     events, parse_errors = read_events(root / "runs.jsonl")
     batches, warnings = project_events(events)
-    markdown = render_markdown(batches, warnings, parse_errors)
+    ledger, belief_warnings = project_beliefs(events)
+    markdown = render_markdown(batches, warnings + belief_warnings, parse_errors)
+    beliefs_markdown = render_beliefs(ledger)
 
     if write:
         (root / "board.md").write_text(markdown, encoding="utf-8")
+        (root / "beliefs.md").write_text(beliefs_markdown, encoding="utf-8")
 
-    Console().print(Markdown(markdown))
+    console = Console()
+    console.print(Markdown(markdown))
+    if ledger:
+        console.print(Markdown(beliefs_markdown))
 
 
 def _now() -> str:

@@ -105,7 +105,7 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             continue
 
         if event.type == "note" or event.type.startswith("belief_"):
-            continue  # 由后续计划的信念账本消费
+            continue  # 信念跨批次存活，由 beliefs.py 单独投影
 
         batch = batches.get(event.batch)
         if batch is None:
