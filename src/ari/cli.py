@@ -27,6 +27,12 @@ from .planning import (
     parse_predictions,
 )
 from .project import project as project_events
+from .reviewing import (
+    build_batch_draft,
+    build_reflection_draft,
+    parse_reflection,
+    pending,
+)
 
 app = typer.Typer(add_completion=False, help="实验预测、记录与复盘闭环")
 
@@ -317,3 +323,77 @@ def _confirm(parsed, batch) -> bool:
         console.print(f"[dim]{note}[/dim]")
 
     return typer.confirm("写入？", default=True)
+
+
+def _edit_reflection(draft: str, scope: str, name: str):
+    """编辑一份复盘草稿直到校验通过。
+
+    与 plan 的 _edit_until_valid 同构，区别在于复盘的校验抛 ValueError
+    （草稿只有 cause/next 两个字段，不需要 planning 那种结构化错误列表），
+    这里把它拢成单条错误回填。用户清空文件表示放弃，返回 None。
+    """
+    text = draft
+    while True:
+        edited = edit_text(text, name=name)
+        if edited is None:
+            return None
+        try:
+            return parse_reflection(edited, scope=scope)
+        except ValueError as exc:
+            text = with_errors(edited, [str(exc)])
+
+
+@app.command()
+def review(
+    project_dir: str = typer.Option(".", "--project", "-p", help="项目目录"),
+) -> None:
+    """逐个复盘 SURPRISE 的 run，写下原因，把批次收口。"""
+    root = Path(project_dir)
+    runs_path = root / "runs.jsonl"
+    events, _ = read_events(runs_path)
+    batches, _ = project_events(events)
+
+    if not batches:
+        typer.echo("这个项目还没有批次。先运行 ari plan 开一个。", err=True)
+        raise typer.Exit(code=1)
+
+    queue = pending(batches)
+    if queue:
+        typer.echo(f"有 {len(queue)} 个 SURPRISE 待复盘。")
+    else:
+        typer.echo("没有待复盘的 SURPRISE——这一批要么全部符合预期，要么属于噪声，先补 seed。")
+
+    try:
+        for run in queue:
+            payload = _edit_reflection(
+                build_reflection_draft(run), scope="run", name=f"review-{run.run}"
+            )
+            if payload is None:
+                typer.echo(f"跳过 {run.run}。")
+                continue
+            append_event(
+                runs_path,
+                Event(
+                    ts=_now(), type="reflection", batch=run.batch, run=run.run, payload=payload
+                ),
+            )
+            typer.echo(f"已记录 {run.run} 的复盘。")
+    except EditorUnavailable as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    batch = list(batches.values())[-1]
+    if not typer.confirm(f"给批次 {batch.id} 写一句整体收口？", default=False):
+        return
+
+    payload = _edit_reflection(
+        build_batch_draft(batch.id), scope="batch", name=f"review-{batch.id}-close"
+    )
+    if payload is None:
+        typer.echo("没有写收口，批次保持进行中。")
+        return
+    append_event(
+        runs_path,
+        Event(ts=_now(), type="reflection", batch=batch.id, payload=payload),
+    )
+    typer.echo(f"批次 {batch.id} 已收口。")
