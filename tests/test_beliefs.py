@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ari.beliefs import make_belief_id, normalize_text
+from ari.beliefs import make_belief_id, normalize_text, project_beliefs
+from ari.events import Event
 
 
 def test_same_text_gets_the_same_id():
@@ -52,3 +53,116 @@ def test_empty_text_is_rejected():
 
 def test_normalize_text_collapses_whitespace():
     assert normalize_text("  a\n\n  b  ") == "a b"
+
+
+def _added(belief_id, text, ts="2026-08-24T10:00:00+08:00", batch="b1", run="model=large"):
+    return Event(
+        ts=ts,
+        type="belief_added",
+        batch=batch,
+        run=run,
+        payload={"id": belief_id, "text": text},
+    )
+
+
+def _changed(kind, belief_id, ts="2026-08-25T10:00:00+08:00", batch="b2", note=""):
+    return Event(
+        ts=ts,
+        type=kind,
+        batch=batch,
+        run=None,
+        payload={"id": belief_id, "note": note},
+    )
+
+
+def test_added_belief_lands_in_the_ledger():
+    ledger, warnings = project_beliefs([_added("bel-aaaa", "大模型吃不下小 lr")])
+
+    assert warnings == []
+    assert ledger["bel-aaaa"].text == "大模型吃不下小 lr"
+    assert ledger["bel-aaaa"].added_ts == "2026-08-24T10:00:00+08:00"
+    assert ledger["bel-aaaa"].batch == "b1"
+    assert ledger["bel-aaaa"].run == "model=large"
+    assert ledger["bel-aaaa"].status == "在册"
+
+
+def test_refuted_belief_is_marked_and_keeps_its_text():
+    ledger, _ = project_beliefs(
+        [
+            _added("bel-aaaa", "大模型吃不下小 lr"),
+            _changed("belief_refuted", "bel-aaaa", note="换了调度器就不成立了"),
+        ]
+    )
+
+    belief = ledger["bel-aaaa"]
+    assert belief.refuted
+    assert belief.status == "已推翻"
+    assert belief.text == "大模型吃不下小 lr"  # 推翻不是删除，历史必须留着
+    assert belief.changes[0].note == "换了调度器就不成立了"
+    assert belief.changes[0].batch == "b2"
+
+
+def test_reinforced_and_weakened_shape_the_status():
+    reinforced, _ = project_beliefs(
+        [_added("bel-aaaa", "x"), _changed("belief_reinforced", "bel-aaaa")]
+    )
+    weakened, _ = project_beliefs(
+        [_added("bel-aaaa", "x"), _changed("belief_weakened", "bel-aaaa")]
+    )
+
+    assert reinforced["bel-aaaa"].status == "已加强"
+    assert weakened["bel-aaaa"].status == "动摇中"
+
+
+def test_change_to_an_unknown_id_warns_instead_of_crashing():
+    ledger, warnings = project_beliefs([_changed("belief_refuted", "bel-zzzz")])
+
+    assert ledger == {}
+    assert len(warnings) == 1
+    assert "bel-zzzz" in warnings[0]
+
+
+def test_duplicate_add_keeps_the_first_one():
+    ledger, warnings = project_beliefs(
+        [
+            _added("bel-aaaa", "x", ts="2026-08-24T10:00:00+08:00"),
+            _added("bel-aaaa", "x", ts="2026-08-26T10:00:00+08:00"),
+        ]
+    )
+
+    assert len(ledger) == 1
+    assert ledger["bel-aaaa"].added_ts == "2026-08-24T10:00:00+08:00"
+    assert warnings == []
+
+
+def test_malformed_add_is_reported_not_silently_dropped():
+    ledger, warnings = project_beliefs(
+        [Event(ts="2026-08-24T10:00:00+08:00", type="belief_added", payload={"text": "没有 id"})]
+    )
+
+    assert ledger == {}
+    assert len(warnings) == 1
+
+
+def test_ledger_order_follows_the_event_stream():
+    ledger, _ = project_beliefs(
+        [_added("bel-bbbb", "第二个先写不行"), _added("bel-aaaa", "第一个")]
+    )
+
+    assert list(ledger) == ["bel-bbbb", "bel-aaaa"]
+
+
+def test_unrelated_events_are_ignored():
+    ledger, warnings = project_beliefs(
+        [
+            Event(
+                ts="2026-08-24T10:00:00+08:00",
+                type="run_result",
+                batch="b1",
+                run="model=large",
+                payload={"seed": 0, "metrics": {"top1_acc": 0.9}},
+            )
+        ]
+    )
+
+    assert ledger == {} and warnings == []
