@@ -1,6 +1,6 @@
 # 信念账本 实现计划（v1 第三阶段）
 
-> **For agentic workers:** REQUIRED SUB-SKILL: 用 @superpowers:executing-plans 逐个任务执行本计划。每个任务内部遵循 @superpowers:test-driven-development：先写失败的测试，跑一遍确认它失败，再写最小实现，跑绿，提交。步骤用 `- [ ]` 复选框跟踪。
+> **For agentic workers:** REQUIRED SUB-SKILL: 用 @superpowers:executing-plans 逐个任务执行本计划。每个任务内部遵循 @superpowers:test-driven-development：先写失败的测试，跑一遍确认它失败，再写最小实现，跑绿，提交。步骤用 `- [x]` 复选框跟踪。
 
 **Goal:** 让复盘的产物从「一段感想」变成「一条下次预测时用得上的判断」——`belief_*` 事件落地为账本，`beliefs.md` 由 `ari board` 派生渲染，`ari review` 在同一份草稿里顺手记下信念的增减。
 
@@ -59,7 +59,7 @@ README.md                改。beliefs.md 的说明
 - Create: `src/ari/beliefs.py`
 - Test: `tests/test_beliefs.py`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 ```python
 """信念账本。见 spec §3.2、§7.1。"""
@@ -118,12 +118,12 @@ def test_normalize_text_collapses_whitespace():
     assert normalize_text("  a\n\n  b  ") == "a b"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_beliefs.py -v`
 Expected: FAIL，`ModuleNotFoundError: No module named 'ari.beliefs'`
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Step 3: 写最小实现**
 
 Create `src/ari/beliefs.py`：
 
@@ -174,12 +174,12 @@ def make_belief_id(text: str, existing: dict[str, str] | None = None) -> str:
     raise ValueError(f"信念 ID 冲突无法解决：{text!r}")
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_beliefs.py -v`
 Expected: 8 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/ari/beliefs.py tests/test_beliefs.py
@@ -196,7 +196,7 @@ git commit -m "feat: 信念的不可变短 ID"
 
 `project.py` 继续跳过 `belief_*`（它投影的是 batch/run），账本单独折叠一遍同一份事件流。信念不属于任何批次——它跨批次存活，硬塞进 `BatchState` 只会把两件事搅在一起。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `tests/test_beliefs.py`：
 
@@ -302,12 +302,12 @@ def test_unrelated_events_are_ignored():
     assert ledger == {} and warnings == []
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_beliefs.py -v`
 Expected: FAIL，`ImportError: cannot import name 'project_beliefs'`
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Step 3: 写最小实现**
 
 在 `src/ari/beliefs.py` 顶部的 import 段加 `from dataclasses import dataclass, field`，并在 `normalize_text` 之前加常量、在文件末尾追加实现：
 
@@ -411,12 +411,12 @@ def project_beliefs(events) -> tuple[dict[str, Belief], list[str]]:
     return ledger, warnings
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_beliefs.py -v`
 Expected: 16 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/ari/beliefs.py tests/test_beliefs.py
@@ -433,7 +433,7 @@ git commit -m "feat: belief_* 事件折叠成信念账本"
 
 与 `board.py` 同一条约定：渲染只产出 markdown 字符串，写文件和打印终端都用它，避免两套渲染各自漂移。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `tests/test_beliefs.py`：
 
@@ -493,12 +493,12 @@ def test_render_reports_dangling_references():
     assert "bel-zzzz" in text
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_beliefs.py -v`
 Expected: FAIL，`ImportError: cannot import name 'render_markdown'`
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Step 3: 写最小实现**
 
 追加到 `src/ari/beliefs.py`：
 
@@ -560,12 +560,12 @@ def _render_belief(number: int, belief: Belief) -> list[str]:
     return lines
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_beliefs.py -v`
 Expected: 21 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/ari/beliefs.py tests/test_beliefs.py
@@ -583,7 +583,7 @@ git commit -m "feat: beliefs.md 渲染，已推翻的信念留在页面上"
 
 spec §4 要求 `ari board` 含 `beliefs.md` 重新生成。悬空引用的警告并进看板的「提示」段——数据有问题就该在最常看的那一页上看到。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 Create `tests/test_cli_board.py`：
 
@@ -671,12 +671,12 @@ def test_board_on_an_empty_project_still_writes_a_beliefs_md(tmp_path):
     assert "还没有" in (project / "beliefs.md").read_text(encoding="utf-8")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_cli_board.py -v`
 Expected: 5 failed（`beliefs.md` 不存在）
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Step 3: 写最小实现**
 
 `src/ari/cli.py` 的 import 段加：
 
@@ -718,12 +718,12 @@ def board(
             continue  # 信念跨批次存活，由 beliefs.py 单独投影
 ```
 
-- [ ] **Step 4: 跑全量测试**
+- [x] **Step 4: 跑全量测试**
 
 Run: `uv run pytest -q`
 Expected: 全绿（原有 203 + 本任务新增）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/ari/cli.py src/ari/project.py tests/test_cli_board.py
@@ -740,7 +740,7 @@ git commit -m "feat: ari board 一并重新生成 beliefs.md"
 
 关键取舍：信念段挂在**已有草稿的末尾**，不另开一次编辑器。整段可以删掉不填。`parse_reflection` 的返回值保持 dict 且原有三个键不动，只增加两个键——已有调用方与测试不受影响。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `tests/test_reviewing.py`（顶部 import 加 `build_batch_draft`）：
 
@@ -854,12 +854,12 @@ def test_untouched_next_placeholder_becomes_blank():
 
 `tests/test_reviewing.py` 顶部的 import 加上 `from ari.beliefs import BeliefChange`。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_reviewing.py -v`
 Expected: 新增的 9 个失败（`beliefs_added` 不在草稿里 / `build_reflection_draft` 不接第二个参数 / `KeyError: 'beliefs_added'`）
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Step 3: 写最小实现**
 
 `src/ari/reviewing.py`：把模块 docstring 里那句「本模块不含 LLM 追问（留给计划三）」改成「留给计划四」，加 `import re`，然后加常量：
 
@@ -1025,12 +1025,12 @@ def build_batch_draft(batch_id: str, ledger: dict | None = None) -> str:
     return BATCH_DRAFT.format(batch_id=batch_id) + "\n".join(_belief_section(ledger)) + "\n"
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_reviewing.py -v`
 Expected: 全绿（原有 13 + 新增 9）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/ari/reviewing.py tests/test_reviewing.py
@@ -1045,7 +1045,7 @@ git commit -m "feat: 复盘草稿里顺手记下信念的增减"
 - Modify: `src/ari/reviewing.py`、`src/ari/cli.py:346-399`（`review` 命令）
 - Test: `tests/test_reviewing.py`、`tests/test_cli_review.py`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `tests/test_reviewing.py`：
 
@@ -1170,12 +1170,12 @@ def test_batch_closure_can_also_record_a_belief(tmp_path, monkeypatch):
     assert added[0].run is None
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_reviewing.py tests/test_cli_review.py -v`
 Expected: FAIL，`ImportError: cannot import name 'build_reflection_events'`
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Step 3: 写最小实现**
 
 `src/ari/reviewing.py` 的 import 段加 `from .beliefs import make_belief_id, normalize_text`、`from .events import Event`，并在文件末尾追加：
 
@@ -1273,12 +1273,12 @@ def build_reflection_events(
     typer.echo(f"批次 {batch.id} 已收口。")
 ```
 
-- [ ] **Step 4: 跑全量测试**
+- [x] **Step 4: 跑全量测试**
 
 Run: `uv run pytest -q`
 Expected: 全绿
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/ari/reviewing.py src/ari/cli.py tests/test_reviewing.py tests/test_cli_review.py
@@ -1294,7 +1294,7 @@ git commit -m "feat: 复盘写出 belief_* 事件，账本随复盘增长"
 
 顺手修掉一处过时提示：`cli.py:81` 的 `init` 还在说「ari plan 尚未实现，当前可手写 runs.jsonl」——第二阶段已经实现了。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `tests/test_e2e_loop.py`（沿用该文件已有的 `DESIGN` / `PREDICTIONS` / `_write_result` / `FakeEditor`）：
 
@@ -1361,12 +1361,12 @@ def test_beliefs_md_is_a_derived_product(tmp_path, monkeypatch):
     assert (project / "beliefs.md").read_text(encoding="utf-8") == first
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/test_e2e_loop.py -v`
 Expected: 新增 2 个失败
 
-- [ ] **Step 3: 实现 / 修文档**
+- [x] **Step 3: 实现 / 修文档**
 
 绝大部分实现已由 Task 1–6 完成，本步只做三件事：
 
@@ -1390,7 +1390,7 @@ Expected: 新增 2 个失败
 引用只用 ID，不用序号：用 `#3` 这类序号引用，插入或删除一条就会让历史上所有引用静默指向别的东西。`beliefs.md` 里的编号只是渲染层给人看的。
 ```
 
-- [ ] **Step 4: 跑全量测试 + 手动验证**
+- [x] **Step 4: 跑全量测试 + 手动验证**
 
 ```bash
 uv run pytest -q
@@ -1399,7 +1399,7 @@ uv run pytest -q
 
 Expected: 测试全绿；`--help` 正常列出五个命令。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tests/test_e2e_loop.py README.md src/ari/cli.py
@@ -1410,10 +1410,20 @@ git commit -m "docs: 信念账本的端到端测试与 README"
 
 ## 完成检查
 
-- [ ] `uv run pytest` 全绿
-- [ ] `ari review` 只开一次编辑器，信念段可以整段删掉不填（有测试覆盖）
-- [ ] `reflection` 事件的 payload 里没有信念字段（有测试覆盖）
-- [ ] 删掉 `beliefs.md` 后 `ari board` 能逐字节重建（有测试覆盖）
-- [ ] 悬空的信念引用只报警告，不让账本或看板不可用（有测试覆盖）
-- [ ] 已推翻的信念仍留在 `beliefs.md` 上（有测试覆盖）
-- [ ] `README.md` 与代码里没有残留「尚未实现」「留给计划三」这类过时表述
+- [x] `uv run pytest` 全绿
+- [x] `ari review` 只开一次编辑器，信念段可以整段删掉不填（有测试覆盖）
+- [x] `reflection` 事件的 payload 里没有信念字段（有测试覆盖）
+- [x] 删掉 `beliefs.md` 后 `ari board` 能逐字节重建（有测试覆盖）
+- [x] 悬空的信念引用只报警告，不让账本或看板不可用（有测试覆盖）
+- [x] 已推翻的信念仍留在 `beliefs.md` 上（有测试覆盖）
+- [x] `README.md` 与代码里没有残留「尚未实现」「留给计划三」这类过时表述
+
+## 执行记录
+
+7 个任务全部完成，全量测试 251 passed（原有 203 + 新增 48）。
+
+与计划的两处偏差：
+
+1. **Task 5 多做了一件事。** 写计划时自审发现 `cause` 的占位符判定是硬编码原文，而 batch 收口草稿用的是另一句占位符——信念段让「只填信念、不动 cause」变得更可能，这个漏洞会被放大。改成按 `<...>` 形状识别，并补了两条测试。
+2. **Task 7 的测试没有先红。** 计划写的是「预期 2 个失败」，实际写完就是绿的：Task 1–6 已经把行为建齐，Task 7 的两条端到端测试是集成层面的回归网，红不起来。已手动实跑一遍闭环、肉眼核对 `beliefs.md` 的真实产物，确认不是空过。
+
