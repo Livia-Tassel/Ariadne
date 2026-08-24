@@ -49,8 +49,8 @@ ari init ~/exp/lr-sweep        # 建立项目骨架
 ari plan  -p ~/exp/lr-sweep    # 编辑器里填批次设计，再填预测表，保存即锁定
 # ……跑实验……
 ari result -p ~/exp/lr-sweep   # 按 result_path 模板自动发现结果文件，确认后入库
-ari review -p ~/exp/lr-sweep   # 逐个处理 SURPRISE，写复盘，收口批次
-ari board  -p ~/exp/lr-sweep   # 渲染看板
+ari review -p ~/exp/lr-sweep   # 逐个处理 SURPRISE，写复盘与信念，收口批次
+ari board  -p ~/exp/lr-sweep   # 渲染看板，重新生成 board.md 与 beliefs.md
 ```
 
 全程不需要手写一行 JSON。
@@ -62,8 +62,21 @@ ari board  -p ~/exp/lr-sweep   # 渲染看板
 | `ari init <dir>` | 建立项目目录骨架（`runs.jsonl` / `logs/` / `config.toml`） |
 | `ari plan` | 开批次：写假设、声明变量维度与指标规格，填预测表并锁定。支持 `--dims "model=base,large"` 预置维度跳过第一段编辑 |
 | `ari result` | 录入实测：按 `result_path` 模板自动发现结果文件，或 `--manual` 手工填写。解析结果先展示「抽到了这些，对吗？」确认后才落盘 |
-| `ari review` | 逐个复盘 SURPRISE 的 run，追问原因，写 `reflection`；全部处理完后可写一条 batch 级收口 |
-| `ari board` | 渲染看板（含 `board.md` 派生产物）。未复盘的 SURPRISE 置顶 |
+| `ari review` | 逐个复盘 SURPRISE 的 run，追问原因，写 `reflection`；顺手记下信念的增减；全部处理完后可写一条 batch 级收口 |
+| `ari board` | 渲染看板，并重新生成 `board.md` 与 `beliefs.md`。未复盘的 SURPRISE 置顶 |
+
+### 信念账本
+
+复盘不该只留下一段感想。`ari review` 的草稿末尾会问两件事：
+
+- **你现在相信什么？** 写下的每一条进账本，拿到一个不可变短 ID（`bel-7a3c`，内容 hash 前 4 位）。
+- **这次结果动了哪些已有信念？** 把 `unchanged` 改成 `reinforced` / `weakened` / `refuted`。
+
+两件事都挂在同一份草稿里，不另开编辑器，整段也可以删掉不填。
+
+`beliefs.md` 由这些事件派生，随 `ari board` 一并重新生成。被推翻的信念不会消失，只是挪到「已推翻」一节——一条被证伪的判断连同证伪它的那次实验，正是 discussion 里最有价值的段落。
+
+引用只用 ID，不用序号：用 `#3` 这类序号引用，插入或删除一条就会让历史上所有引用静默指向别的东西。`beliefs.md` 里的编号只是渲染层给人看的。
 
 ### 判定
 
@@ -74,7 +87,7 @@ ari board  -p ~/exp/lr-sweep   # 渲染看板
 - **NOISY** —— seed 间标准差已超过判定分辨率，本次判定无效，需补 seed
 - **NO_RESULT / UNVERIFIED** —— 尚无结果 / 来源存疑待人工确认
 
-`board.md` 与 `beliefs.md`（后续）都是 `runs.jsonl` 的派生产物，删掉可随时用 `ari board` 重新生成，不丢数据。
+`board.md` 与 `beliefs.md` 都是 `runs.jsonl` 的派生产物，删掉可随时用 `ari board` 重新生成，不丢数据。
 
 ## 开发
 

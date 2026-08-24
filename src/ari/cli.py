@@ -81,7 +81,7 @@ def init(path: str = typer.Argument(..., help="项目目录")) -> None:
     (project / "config.toml").write_text(CONFIG_TEMPLATE, encoding="utf-8")
 
     typer.echo(f"已初始化 {project}")
-    typer.echo("下一步：ari plan 开启第一个批次（尚未实现，当前可手写 runs.jsonl 后 ari board）")
+    typer.echo("下一步：ari plan 开启第一个批次。")
 
 
 @app.command()

@@ -126,3 +126,60 @@ def test_full_loop_writes_events_in_the_right_order(tmp_path, monkeypatch):
     assert run_level.payload["scope"] == "run"
     assert batch_level.run is None
     assert batch_level.payload["scope"] == "batch"
+
+
+def _loop_until_review(project, monkeypatch, reflection):
+    """跑到 review 为止：init → plan → result → review。"""
+    runner.invoke(cli.app, ["init", str(project)])
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(DESIGN, PREDICTIONS))
+    runner.invoke(cli.app, ["plan", "-p", str(project)])
+    _write_result(project, "large", 0.95)
+    _write_result(project, "base", 0.801)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor())
+    runner.invoke(cli.app, ["result", "-p", str(project)], input="y\n")
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(reflection))
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+
+def test_belief_survives_the_loop_and_can_be_refuted_later(tmp_path, monkeypatch):
+    from ari.beliefs import make_belief_id
+
+    project = tmp_path / "exp"
+
+    # 第一轮：跑出 SURPRISE，复盘时写下一条信念
+    _loop_until_review(
+        project, monkeypatch, "cause: 增强没关\nbeliefs_added:\n  - 增强对小数据集有害\n"
+    )
+    runner.invoke(cli.app, ["board", "-p", str(project)])
+
+    beliefs = (project / "beliefs.md").read_text(encoding="utf-8")
+    assert "增强对小数据集有害" in beliefs
+    assert "在册" in beliefs
+
+    # 第二轮：同一条信念被后来的复盘推翻
+    belief_id = make_belief_id("增强对小数据集有害")
+    monkeypatch.setattr(
+        cli,
+        "edit_text",
+        FakeEditor(f"cause: 换了调度器就不成立了\nbeliefs:\n  {belief_id}: refuted\n"),
+    )
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="y\n")
+    runner.invoke(cli.app, ["board", "-p", str(project)])
+
+    beliefs = (project / "beliefs.md").read_text(encoding="utf-8")
+    assert "已推翻" in beliefs
+    assert "增强对小数据集有害" in beliefs  # 推翻不是删除
+
+
+def test_beliefs_md_is_a_derived_product(tmp_path, monkeypatch):
+    project = tmp_path / "exp"
+    _loop_until_review(
+        project, monkeypatch, "cause: 增强没关\nbeliefs_added:\n  - 一条信念\n"
+    )
+    runner.invoke(cli.app, ["board", "-p", str(project)])
+    first = (project / "beliefs.md").read_text(encoding="utf-8")
+
+    (project / "beliefs.md").unlink()
+    runner.invoke(cli.app, ["board", "-p", str(project)])
+
+    assert (project / "beliefs.md").read_text(encoding="utf-8") == first
