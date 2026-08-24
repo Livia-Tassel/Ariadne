@@ -1,9 +1,11 @@
 import pytest
 from conftest import make_batch_opened, make_prediction, make_result
 
+from ari.beliefs import BeliefChange, make_belief_id, project_beliefs
 from ari.events import Event
 from ari.project import project
 from ari.reviewing import (
+    build_batch_draft,
     build_reflection_draft,
     parse_reflection,
     pending,
@@ -111,3 +113,108 @@ def test_placeholder_cause_is_rejected():
 
     with pytest.raises(ValueError):
         parse_reflection(draft_default)
+
+
+def _ledger(*texts):
+    events = [
+        Event(
+            ts="2026-08-20T10:00:00+08:00",
+            type="belief_added",
+            batch="b0",
+            payload={"id": f"bel-{i:04d}", "text": text},
+        )
+        for i, text in enumerate(texts)
+    ]
+    ledger, _ = project_beliefs(events)
+    return ledger
+
+
+def test_draft_asks_what_you_now_believe():
+    batches, _ = project(_batch_with(0.830, 0.950))
+
+    draft = build_reflection_draft(pending(batches)[0])
+
+    assert "beliefs_added" in draft
+
+
+def test_draft_lists_existing_beliefs_with_their_ids():
+    batches, _ = project(_batch_with(0.830, 0.950))
+
+    draft = build_reflection_draft(pending(batches)[0], _ledger("大模型吃不下小 lr"))
+
+    assert "bel-0000" in draft
+    assert "大模型吃不下小 lr" in draft  # 光有 ID 认不出是哪条
+    assert "unchanged" in draft
+
+
+def test_draft_hides_refuted_beliefs():
+    ledger = _ledger("还成立的", "被推翻的")
+    ledger["bel-0001"].changes.append(
+        BeliefChange(kind="belief_refuted", ts="2026-08-21T10:00:00+08:00")
+    )
+    batches, _ = project(_batch_with(0.830, 0.950))
+
+    draft = build_reflection_draft(pending(batches)[0], ledger)
+
+    assert "bel-0000" in draft
+    assert "bel-0001" not in draft  # 已经推翻的不再问
+
+
+def test_batch_draft_also_carries_the_belief_section():
+    # 全 CONFIRMED 的批次没有 run 级复盘，收口是记信念的唯一入口
+    assert "beliefs_added" in build_batch_draft("b1", _ledger("x"))
+
+
+def test_parse_reads_added_beliefs():
+    parsed = parse_reflection(
+        "cause: 增强没关\nbeliefs_added:\n  - 大模型吃不下小 lr\n  - 增强对小数据集有害\n"
+    )
+
+    assert parsed["beliefs_added"] == ["大模型吃不下小 lr", "增强对小数据集有害"]
+
+
+def test_parse_skips_the_untouched_placeholder():
+    draft = build_reflection_draft(pending(project(_batch_with(0.830, 0.950))[0])[0]).replace(
+        "<为什么会这样？>", "增强没关"
+    )
+
+    parsed = parse_reflection(draft)
+
+    assert parsed["beliefs_added"] == []
+    assert parsed["belief_changes"] == {}
+
+
+def test_parse_reads_belief_changes_and_drops_unchanged():
+    parsed = parse_reflection(
+        "cause: 增强没关\nbeliefs:\n  bel-0000: refuted\n  bel-0001: unchanged\n"
+        "  bel-0002: reinforced\n"
+    )
+
+    assert parsed["belief_changes"] == {
+        "bel-0000": "belief_refuted",
+        "bel-0002": "belief_reinforced",
+    }
+
+
+def test_parse_rejects_an_unknown_belief_status():
+    with pytest.raises(ValueError) as exc:
+        parse_reflection("cause: 增强没关\nbeliefs:\n  bel-0000: 大概吧\n")
+
+    assert "bel-0000" in str(exc.value)
+
+
+def test_reflection_without_a_belief_section_is_still_valid():
+    parsed = parse_reflection("cause: 增强没关\nnext: 重跑\n")
+
+    assert parsed["beliefs_added"] == [] and parsed["belief_changes"] == {}
+
+
+def test_any_untouched_angle_bracket_placeholder_counts_as_blank():
+    # batch 收口草稿的占位符与 run 级的不是同一句。信念段让「只填信念、
+    # 不动 cause」变得更可能，所以占位符判定必须是通用规则而不是硬编码。
+    with pytest.raises(ValueError):
+        parse_reflection(build_batch_draft("b1") + "\n")
+
+
+def test_untouched_next_placeholder_becomes_blank():
+    assert parse_reflection("cause: 真的原因\nnext: <随便写点什么>\n")["next"] == ""
