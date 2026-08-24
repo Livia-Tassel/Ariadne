@@ -1,0 +1,13 @@
+{
+  "ranking": ["model=large", "model=base"],
+  "directions": [
+    {
+      "variable": "model",
+      "effect": "更大的模型在同一数据集上一般略优，差距取决于数据量是否够喂饱它"
+    }
+  ],
+  "confounders": [
+    "学习率是否为两个规模分别调过——沿用小模型的 lr 常常让大模型吃亏",
+    "两次运行的随机种子数量是否相同"
+  ]
+}

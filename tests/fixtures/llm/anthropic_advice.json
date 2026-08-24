@@ -1,0 +1,14 @@
+{
+  "ranking": ["model=large", "model=base"],
+  "directions": [
+    {
+      "variable": "model",
+      "effect": "容量更大通常带来更高的 top1_acc，但在数据量不变的情况下收益递减，且更容易过拟合"
+    }
+  ],
+  "confounders": [
+    "两组的数据增强配置是否完全一致——增强常常随模型规模被顺手改掉",
+    "batch size 是否随模型一起变了，那会连带改变有效学习率",
+    "更大的模型是否跑了同样多的 epoch，还是因为更慢而被提前停掉"
+  ]
+}
