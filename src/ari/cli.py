@@ -6,13 +6,16 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.table import Table
 
 from .board import render_markdown
 from .drafts import with_errors
 from .editor import EditorUnavailable, edit_text
-from .events import append_event, read_events
+from .events import Event, append_event, read_events
+from .ingest import build_manual_draft, discover, parse_manual, parse_result_file
 from .planning import (
     ValidationFailed,
     build_design_draft,
@@ -174,3 +177,143 @@ def _preset_dimensions(draft: str, dimensions: dict[str, list[str]]) -> str:
     for name, values in dimensions.items():
         rendered.append(f"  {name}: [{', '.join(values)}]")
     return draft.replace("dimensions:\n  model: [base, large]", "\n".join(rendered))
+
+
+def _latest_batch(batches: dict, wanted: str | None):
+    if not batches:
+        typer.echo("这个项目还没有批次。先运行 ari plan 开一个。", err=True)
+        raise typer.Exit(code=1)
+    if wanted:
+        if wanted not in batches:
+            typer.echo(f"没有批次 {wanted}。现有：{', '.join(batches)}", err=True)
+            raise typer.Exit(code=1)
+        return batches[wanted]
+    return list(batches.values())[-1]
+
+
+def _metric_names(batch) -> list[str]:
+    """本批次关心哪些指标——以预测表声明的为准。"""
+    names: list[str] = []
+    for run in batch.runs.values():
+        for name in (run.prediction or {}).get("metrics", {}):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+@app.command()
+def result(
+    project_dir: str = typer.Option(".", "--project", "-p", help="项目目录"),
+    batch_id: str = typer.Option(None, "--batch", "-b", help="批次 id，默认最新的"),
+    manual: bool = typer.Option(False, "--manual", help="强制手工填写，不自动发现文件"),
+) -> None:
+    """录入实测结果：按 result_path 模板自动发现，或手工填写。"""
+    root = Path(project_dir)
+    runs_path = root / "runs.jsonl"
+    events, _ = read_events(runs_path)
+    batches, _ = project_events(events)
+    batch = _latest_batch(batches, batch_id)
+
+    runs = list(batch.runs)
+    metrics = _metric_names(batch)
+    if not metrics:
+        typer.echo(f"批次 {batch.id} 还没有预测，先运行 ari plan。", err=True)
+        raise typer.Exit(code=1)
+
+    if manual or not batch.result_path:
+        parsed = _collect_manually(batch, runs, metrics)
+    else:
+        parsed = _collect_from_files(root, batch, runs, metrics)
+
+    if not parsed:
+        return
+    if not _confirm(parsed, batch):
+        typer.echo("没有写入任何内容。")
+        return
+
+    for item in parsed:
+        append_event(
+            runs_path,
+            Event(
+                ts=_now(),
+                type="run_result",
+                batch=batch.id,
+                run=item.run,
+                payload={
+                    "seed": item.seed,
+                    "metrics": item.metrics,
+                    "source": {
+                        "path": str(item.path.relative_to(root)) if item.path else None,
+                        "kind": item.kind,
+                        "mtime": item.mtime or None,
+                    },
+                },
+            ),
+        )
+
+    typer.echo(f"已写入 {len(parsed)} 条结果。运行 ari board 看判定。")
+
+
+def _collect_from_files(root: Path, batch, runs: list[str], metrics: list[str]):
+    found, unmatched = discover(root, batch.result_path, runs)
+
+    if unmatched:
+        typer.echo("这些文件路径对得上模板，但不属于本批次的任何 run：")
+        for path in unmatched:
+            typer.echo(f"  {path}")
+        typer.echo("（模板写错了？还是跑了计划外的配置？）\n")
+
+    if not found:
+        typer.echo(f"按模板 {batch.result_path} 没找到结果文件。")
+        typer.echo("跑完实验了吗？或者用 ari result --manual 手工填。")
+        return []
+
+    parsed = []
+    for item in found:
+        one = parse_result_file(item.path, metrics)
+        one.run, one.seed = item.run, item.seed
+        parsed.append(one)
+    return parsed
+
+
+def _collect_manually(batch, runs: list[str], metrics: list[str]):
+    draft = build_manual_draft(runs, metrics, batch.id)
+    try:
+        text = edit_text(draft, name=f"result-{batch.id}")
+    except EditorUnavailable as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    if text is None:
+        typer.echo("已放弃，没有写入任何内容。")
+        return []
+    try:
+        return parse_manual(text, runs, metrics)
+    except ValueError as exc:
+        typer.echo(f"填写有问题：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _confirm(parsed, batch) -> bool:
+    """抽到的结果先给人看一眼。错误的指标进表比缺失指标更有害。"""
+    table = Table(title=f"批次 {batch.id}：抽到了这些，对吗？", box=box.SIMPLE)
+    table.add_column("run")
+    table.add_column("seed", justify="right")
+    table.add_column("指标")
+    table.add_column("来源")
+
+    notes = set()
+    for item in parsed:
+        values = "  ".join(f"{k}={v:g}" for k, v in item.metrics.items())
+        if item.missing:
+            values += f"   [缺失: {', '.join(item.missing)}]"
+        source = str(item.path.name) if item.path else "手工填写"
+        table.add_row(item.run, str(item.seed), values or "—", source)
+        if item.note:
+            notes.add(item.note)
+
+    console = Console()
+    console.print(table)
+    for note in sorted(notes):
+        console.print(f"[dim]{note}[/dim]")
+
+    return typer.confirm("写入？", default=True)
