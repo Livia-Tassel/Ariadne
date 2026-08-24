@@ -1,0 +1,12 @@
+#!/bin/sh
+# ari 的包装脚本。
+#
+# 直接用 `uv run ari` 在某些 macOS 环境下会失效：.venv 里的文件被打上
+# UF_HIDDEN 标记时，CPython >= 3.13 会静默跳过 hidden 的 .pth 文件，
+# editable 安装因此不生效，且 uv 不会报任何错。
+#
+# 这里显式设置 PYTHONPATH，绕开对 .pth 的依赖。
+set -e
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
+    exec uv run --project "$ROOT" python -m ari "$@"
