@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ari.beliefs import make_belief_id, normalize_text, project_beliefs
+from ari.beliefs import make_belief_id, normalize_text, project_beliefs, render_markdown
 from ari.events import Event
 
 
@@ -166,3 +166,59 @@ def test_unrelated_events_are_ignored():
     )
 
     assert ledger == {} and warnings == []
+
+
+def test_render_shows_human_numbering_and_the_immutable_id():
+    ledger, _ = project_beliefs([_added("bel-aaaa", "大模型吃不下小 lr")])
+
+    text = render_markdown(ledger)
+
+    assert "1." in text
+    assert "bel-aaaa" in text
+    assert "大模型吃不下小 lr" in text
+    assert "编号" in text  # 明确说明编号只是渲染层的产物
+
+
+def test_render_separates_refuted_beliefs_and_keeps_them_visible():
+    ledger, _ = project_beliefs(
+        [
+            _added("bel-aaaa", "还成立的"),
+            _added("bel-bbbb", "被推翻的"),
+            _changed("belief_refuted", "bel-bbbb", note="换了调度器"),
+        ]
+    )
+
+    text = render_markdown(ledger)
+
+    assert "在册" in text and "已推翻" in text
+    assert text.index("还成立的") < text.index("被推翻的")  # 已推翻的排在后面
+    assert "换了调度器" in text
+
+
+def test_render_shows_where_a_belief_came_from_and_what_touched_it():
+    ledger, _ = project_beliefs(
+        [
+            _added("bel-aaaa", "x", batch="b1", run="model=large"),
+            _changed("belief_reinforced", "bel-aaaa", batch="b3"),
+        ]
+    )
+
+    text = render_markdown(ledger)
+
+    assert "b1" in text and "model=large" in text
+    assert "b3" in text and "加强" in text
+
+
+def test_render_on_an_empty_ledger_explains_how_to_get_one():
+    text = render_markdown({})
+
+    assert "review" in text  # 告诉用户信念从哪来，而不是丢一张空表
+    assert "还没有" in text
+
+
+def test_render_reports_dangling_references():
+    ledger, warnings = project_beliefs([_changed("belief_refuted", "bel-zzzz")])
+
+    text = render_markdown(ledger, warnings)
+
+    assert "bel-zzzz" in text

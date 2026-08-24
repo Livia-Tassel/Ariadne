@@ -140,3 +140,60 @@ def project_beliefs(events) -> tuple[dict[str, Belief], list[str]]:
             )
 
     return ledger, warnings
+
+
+def render_markdown(ledger: dict[str, Belief], warnings=()) -> str:
+    """渲染 beliefs.md。已推翻的信念留在页面上，只是挪到后面。
+
+    推翻不是删除：一条被证伪的信念连同证伪它的那次实验，正是 discussion
+    里最有价值的段落。
+    """
+    lines = [
+        "# 信念账本",
+        "",
+        "> 由 runs.jsonl 派生，可随时用 `ari board` 重新生成。",
+        "> 下面的编号只是给人看的，事件流里引用的始终是 `bel-` 开头的 ID。",
+        "",
+    ]
+
+    if not ledger:
+        lines += [
+            "还没有信念。`ari review` 复盘时会问你「现在相信什么」，写下的判断落在这里。",
+            "",
+        ]
+    else:
+        active = [b for b in ledger.values() if not b.refuted]
+        retired = [b for b in ledger.values() if b.refuted]
+
+        if active:
+            lines += [f"## 在册（{len(active)}）", ""]
+            for number, belief in enumerate(active, start=1):
+                lines += _render_belief(number, belief)
+        if retired:
+            lines += [f"## 已推翻（{len(retired)}）", ""]
+            for number, belief in enumerate(retired, start=1):
+                lines += _render_belief(number, belief)
+
+    if warnings:
+        lines += ["## 提示", ""] + [f"- {w}" for w in warnings] + [""]
+
+    return "\n".join(lines)
+
+
+def _render_belief(number: int, belief: Belief) -> list[str]:
+    lines = [f"### {number}. {belief.text}", "", f"- `{belief.id}` · {belief.status}"]
+    if belief.batch:
+        origin = f"- 来自 `{belief.batch}`"
+        if belief.run:
+            origin += f" / `{belief.run}`"
+        lines.append(origin)
+    for change in belief.changes:
+        where = f"`{change.batch}`" if change.batch else "—"
+        if change.run:
+            where += f" / `{change.run}`"
+        entry = f"- {CHANGE_TYPES[change.kind]} ← {where}"
+        if change.note:
+            entry += f"：{change.note}"
+        lines.append(entry)
+    lines.append("")
+    return lines
