@@ -66,31 +66,39 @@ def _format_prediction(value) -> str:
     return f"{float(value):.4g}"
 
 
-def build_reflection_draft(run, ledger: dict | None = None) -> str:
+def deviation_lines(run) -> list[str]:
+    """出意外的指标各偏了多少。草稿与追问 prompt 共用这一份文案。
+
+    两处各写一遍必然漂移，而这几行数字正是复盘唯一的抓手。
+    """
+    metrics = (run.prediction or {}).get("metrics", {})
+    lines = []
+    for name, judgement in run.metric_judgements.items():
+        if judgement.verdict is not Verdict.SURPRISE:
+            continue
+        agg = run.aggregates.get(name)
+        text = (
+            f"{name}：预测 {_format_prediction(metrics[name])}"
+            f" → 实测 {_format_actual(agg)}"
+        )
+        if judgement.deviation is not None:
+            text += f"（偏差 {judgement.deviation:+.4g}，容差 {judgement.threshold:.4g}）"
+        elif agg is not None:
+            low, high = sorted(float(v) for v in metrics[name])
+            outside = agg.mean - high if agg.mean > high else agg.mean - low
+            text += f"（超出区间 {outside:+.4g}）"
+        lines.append(text)
+    return lines
+
+
+def build_reflection_draft(run, ledger: dict | None = None, probe: dict | None = None) -> str:
     prediction = run.prediction or {}
-    metrics = prediction.get("metrics", {})
 
     lines = [
         f"# ── 复盘 {run.batch} / {run.run} ──────────────────────────────",
         "#",
     ]
-
-    for name, judgement in run.metric_judgements.items():
-        if judgement.verdict is not Verdict.SURPRISE:
-            continue
-        agg = run.aggregates.get(name)
-        lines.append(
-            f"#   {name}：预测 {_format_prediction(metrics[name])}"
-            f" → 实测 {_format_actual(agg)}"
-        )
-        if judgement.deviation is not None:
-            lines.append(
-                f"#     偏差 {judgement.deviation:+.4g}，容差 {judgement.threshold:.4g}"
-            )
-        elif agg is not None:
-            low, high = sorted(float(v) for v in metrics[name])
-            outside = agg.mean - high if agg.mean > high else agg.mean - low
-            lines.append(f"#     超出区间 {outside:+.4g}")
+    lines += [f"#   {text}" for text in deviation_lines(run)]
 
     other = [
         f"{n}={_format_actual(run.aggregates.get(n))}"
@@ -104,6 +112,8 @@ def build_reflection_draft(run, ledger: dict | None = None) -> str:
     if rationale:
         lines += ["#", f"#   当初你写的理由：{rationale}"]
 
+    lines += _probe_section(probe)
+
     lines += [
         "#",
         "# 结果与预期不符，说明某个假设有问题。找到那个假设，是这一步唯一的目的。",
@@ -115,6 +125,19 @@ def build_reflection_draft(run, ledger: dict | None = None) -> str:
     lines += _belief_section(ledger)
     lines.append("")
     return "\n".join(lines)
+
+
+def _probe_section(probe: dict | None) -> list[str]:
+    """AI 的追问。全部是 # 注释——它是线索，不是要填的字段。"""
+    if not probe:
+        return []
+    lines = ["#", "# ── AI 的追问（线索，不是结论） ────────────────────────"]
+    for question in probe.get("questions") or []:
+        lines.append(f"#   ? {question}")
+    for hypothesis in probe.get("hypotheses") or []:
+        lines.append(f"#   · 猜测：{hypothesis}")
+    return lines
+
 
 
 def _belief_section(ledger: dict | None) -> list[str]:

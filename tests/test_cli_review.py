@@ -237,3 +237,92 @@ def test_batch_closure_can_also_record_a_belief(tmp_path, monkeypatch):
     added = [e for e in events if e.type == "belief_added"]
     assert [e.payload["text"] for e in added] == ["批次级信念"]
     assert added[0].run is None
+
+
+# ── AI 的追问（spec §7 第 2 步） ──────────────────────────────────────
+
+from ari.llm import LLMUnavailable
+
+PROBE = {
+    "questions": ["两组的数据增强配置一样吗？"],
+    "hypotheses": ["和 b2 那次是同一个原因"],
+}
+
+
+def test_probe_appears_in_the_draft_as_comments(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path)
+    editor = FakeEditor(REFLECTION)
+    monkeypatch.setattr(cli, "edit_text", editor)
+    monkeypatch.setattr(cli, "probe", lambda *a, **k: PROBE)
+
+    result = runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    assert result.exit_code == 0
+    draft = editor.seen[0]
+    assert "数据增强配置一样吗" in draft
+    assert "同一个原因" in draft
+    # 追问必须在注释区，否则会被 YAML 当成字段
+    for line in draft.splitlines():
+        if "数据增强配置一样吗" in line or "同一个原因" in line:
+            assert line.lstrip().startswith("#")
+
+
+def test_probe_does_not_add_an_extra_editor_round_trip(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path)
+    editor = FakeEditor(REFLECTION)
+    monkeypatch.setattr(cli, "edit_text", editor)
+    monkeypatch.setattr(cli, "probe", lambda *a, **k: PROBE)
+
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    assert len(editor.seen) == 1  # 摩擦不许涨
+
+
+def test_probe_is_archived_as_a_note(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(REFLECTION))
+    monkeypatch.setattr(cli, "probe", lambda *a, **k: PROBE)
+
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    events, _ = read_events(project / "runs.jsonl")
+    notes = [e for e in events if e.type == "note"]
+    assert len(notes) == 1
+    assert notes[0].payload["kind"] == "ai_probe"
+    assert notes[0].payload["probe"] == PROBE
+    assert notes[0].run == "model=large"
+    # 追问发生在写复盘之前
+    types = [e.type for e in events]
+    assert types.index("note") < types.index("reflection")
+
+
+def test_review_degrades_to_plain_handwriting_without_llm(tmp_path, monkeypatch):
+    """spec §8：LLM 不可用时 review 降级为无追问的纯手写模式。"""
+    project = _surprise_project(tmp_path)
+    editor = FakeEditor(REFLECTION)
+    monkeypatch.setattr(cli, "edit_text", editor)
+
+    def unavailable(*args, **kwargs):
+        raise LLMUnavailable("没配 key")
+
+    monkeypatch.setattr(cli, "probe", unavailable)
+    result = runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    assert result.exit_code == 0
+    assert "cause" in editor.seen[0]  # 草稿照常，只是少了追问那一段
+    events, _ = read_events(project / "runs.jsonl")
+    assert len([e for e in events if e.type == "reflection"]) == 1
+    assert not [e for e in events if e.type == "note"]
+
+
+def test_probe_text_is_not_parsed_into_the_reflection(tmp_path, monkeypatch):
+    project = _surprise_project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(REFLECTION))
+    monkeypatch.setattr(cli, "probe", lambda *a, **k: PROBE)
+
+    runner.invoke(cli.app, ["review", "-p", str(project)], input="n\n")
+
+    events, _ = read_events(project / "runs.jsonl")
+    reflection = [e for e in events if e.type == "reflection"][0]
+    assert set(reflection.payload) == {"scope", "cause", "next"}
+    assert "questions" not in str(reflection.payload)

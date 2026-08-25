@@ -34,11 +34,17 @@ from .planning import (
     parse_design,
     parse_predictions,
 )
+from .probing import PROBE_SCHEMA
+from .probing import SYSTEM as PROBE_SYSTEM
+from .probing import build_prompt as build_probe_prompt
+from .probing import check_probe
 from .project import project as project_events
+from .recall import similar
 from .reviewing import (
     build_batch_draft,
     build_reflection_draft,
     build_reflection_events,
+    deviation_lines,
     parse_reflection,
     pending,
 )
@@ -448,8 +454,11 @@ def review(
 
     try:
         for run in queue:
+            hint = _probe_or_none(root, batches, run, runs_path)
             parsed = _edit_reflection(
-                build_reflection_draft(run, ledger), scope="run", name=f"review-{run.run}"
+                build_reflection_draft(run, ledger, hint),
+                scope="run",
+                name=f"review-{run.run}",
             )
             if parsed is None:
                 typer.echo(f"跳过 {run.run}。")
@@ -472,3 +481,52 @@ def review(
         return
     _write(parsed, batch.id, None)
     typer.echo(f"批次 {batch.id} 已收口。")
+
+
+def probe(root: Path, batches: dict, run) -> dict:
+    """问一次有针对性的追问。任何问题都抛 LLMUnavailable。
+
+    单独提出来是为了让接线测试能整体替换它——测试不该碰网络。
+    """
+    ref = resolve_role(load_config(root), "reason")
+    history = similar(batches, run)
+    hypothesis = batches[run.batch].hypothesis if run.batch in batches else ""
+    result = complete(
+        ref,
+        PROBE_SYSTEM,
+        build_probe_prompt(
+            batch=run.batch,
+            run=run.run,
+            hypothesis=hypothesis,
+            deviations=deviation_lines(run),
+            rationale=(run.prediction or {}).get("rationale", ""),
+            history=history,
+        ),
+        PROBE_SCHEMA,
+    )
+    return check_probe(result)
+
+
+def _probe_or_none(root: Path, batches: dict, run, runs_path: Path) -> dict | None:
+    """拿到追问就归档一条 note，拿不到就打一行提示继续。
+
+    归档在打开编辑器之前：这个问题确实是在那一刻问出来的。用户之后放弃
+    复盘也不撤销——那是真实发生过的历史，而 note 不参与任何判定。
+    """
+    try:
+        hint = probe(root, batches, run)
+    except LLMUnavailable as exc:
+        typer.echo(f"（{run.run} 没有 AI 的追问：{exc}）")
+        return None
+
+    append_event(
+        runs_path,
+        Event(
+            ts=_now(),
+            type="note",
+            batch=run.batch,
+            run=run.run,
+            payload={"kind": "ai_probe", "probe": hint},
+        ),
+    )
+    return hint
