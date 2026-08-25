@@ -49,6 +49,7 @@ class RunState:
     verdict: Verdict = Verdict.NO_RESULT
     metric_judgements: dict = field(default_factory=dict)
     closed: bool = False
+    reflection: dict | None = None
     integrity: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -119,7 +120,11 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             if scope == "batch" or not event.run:
                 batch.batch_reflection = True
             else:
-                _run_state(batch, event.run).closed = True
+                run = _run_state(batch, event.run)
+                run.closed = True
+                # payload 留着：recall.py 要用 cause 的原文去做历史检索，
+                # 只留一个 closed 布尔值就得再遍历一遍事件流。
+                run.reflection = event.payload
             continue
 
         if event.run is None:
