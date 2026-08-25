@@ -62,6 +62,9 @@ def main() -> None:
 
 CONFIG_TEMPLATE = """\
 # 本文件会进 git —— 只放平台地址与环境变量名，绝不放密钥。
+#
+# 整份配置都是可选的。删掉这个文件，或者不设下面这些环境变量，
+# ari 的每一条命令都照常工作，只是没有 AI 那一段。
 
 [providers.openai]
 base_url = "https://api.openai.com/v1"
@@ -72,10 +75,11 @@ base_url = "https://api.anthropic.com"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [roles]
-# 复盘追问与 plan 阶段的定性判断
-reason = "anthropic:<strong-model>"
-# 日志抽取，v1 暂未启用
-extract = "openai:<fast-model>"
+# 复盘追问与 plan 阶段的定性判断。
+# Anthropic 侧使用 adaptive thinking，需要 Claude 4.6 及以上的模型。
+reason = "anthropic:claude-opus-5"
+# 日志抽取，v1 未启用（见 spec §5.3）
+# extract = "openai:gpt-5.5"
 """
 
 
