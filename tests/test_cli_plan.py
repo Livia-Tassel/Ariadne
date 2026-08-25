@@ -139,3 +139,95 @@ def test_dims_option_rejects_a_malformed_spec(tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["plan", "-p", str(project), "--dims", "model"])
 
     assert result.exit_code != 0
+
+
+# ── AI 的那份判断（spec §4.2） ───────────────────────────────────────
+
+from ari.llm import LLMUnavailable
+
+ADVICE = {
+    "ranking": ["model=large", "model=base"],
+    "directions": [{"variable": "model", "effect": "容量更大通常更好"}],
+    "confounders": ["两组的数据增强是否一致"],
+}
+
+
+def test_plan_shows_ai_advice_after_predictions_are_written(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(DESIGN, PREDICTIONS))
+    monkeypatch.setattr(cli, "advise", lambda *a, **k: ADVICE)
+
+    result = runner.invoke(cli.app, ["plan", "-p", str(project)])
+
+    assert result.exit_code == 0
+    assert "数据增强是否一致" in result.output
+
+
+def test_plan_asks_the_model_only_after_the_events_are_on_disk(tmp_path, monkeypatch):
+    """锚定效应：调用发起的那一刻，用户的预测必须已经落盘。
+
+    不是「先算好、晚点再显示」——那样一个手滑就泄漏了。是那时候根本
+    还没发起调用。
+    """
+    project = _project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(DESIGN, PREDICTIONS))
+    seen = {}
+
+    def spy(*args, **kwargs):
+        events, _ = read_events(project / "runs.jsonl")
+        seen["predictions"] = len([e for e in events if e.type == "prediction"])
+        raise LLMUnavailable("测试里不打真实 API")
+
+    monkeypatch.setattr(cli, "advise", spy)
+    runner.invoke(cli.app, ["plan", "-p", str(project)])
+
+    assert seen["predictions"] == 2
+
+
+def test_plan_without_llm_still_succeeds(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(DESIGN, PREDICTIONS))
+
+    def unavailable(*args, **kwargs):
+        raise LLMUnavailable("没配 key")
+
+    monkeypatch.setattr(cli, "advise", unavailable)
+    result = runner.invoke(cli.app, ["plan", "-p", str(project)])
+
+    assert result.exit_code == 0
+    events, _ = read_events(project / "runs.jsonl")
+    assert len([e for e in events if e.type == "prediction"]) == 2
+    assert not [e for e in events if e.type == "note"]
+
+
+def test_ai_advice_is_archived_as_a_note(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(DESIGN, PREDICTIONS))
+    monkeypatch.setattr(cli, "advise", lambda *a, **k: ADVICE)
+
+    runner.invoke(cli.app, ["plan", "-p", str(project)])
+
+    events, _ = read_events(project / "runs.jsonl")
+    notes = [e for e in events if e.type == "note"]
+    assert len(notes) == 1
+    assert notes[0].payload["kind"] == "ai_advice"
+    assert notes[0].payload["advice"] == ADVICE
+    assert notes[0].batch == "b1"
+    # note 排在全部 prediction 之后——归档发生在锁定之后
+    assert [e.type for e in events][-1] == "note"
+
+
+def test_ai_advice_never_affects_the_verdict(tmp_path, monkeypatch):
+    """AI 的输出是原材料，不是判定。"""
+    from ari.project import project as project_events
+
+    p = _project(tmp_path)
+    monkeypatch.setattr(cli, "edit_text", FakeEditor(DESIGN, PREDICTIONS))
+    monkeypatch.setattr(cli, "advise", lambda *a, **k: ADVICE)
+    runner.invoke(cli.app, ["plan", "-p", str(p)])
+
+    events, _ = read_events(p / "runs.jsonl")
+    batches, warnings = project_events(events)
+
+    assert warnings == []  # note 被投影层安静跳过，不产生警告
+    assert set(batches["b1"].runs) == {"model=base", "model=large"}

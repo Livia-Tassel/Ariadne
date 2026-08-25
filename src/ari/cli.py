@@ -11,13 +11,19 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
 
+from .advising import ADVICE_SCHEMA
+from .advising import SYSTEM as ADVICE_SYSTEM
+from .advising import build_prompt as build_advice_prompt
+from .advising import check_advice
 from .beliefs import project_beliefs
 from .beliefs import render_markdown as render_beliefs
 from .board import render_markdown
+from .config import load_config, resolve_role
 from .drafts import with_errors
 from .editor import EditorUnavailable, edit_text
 from .events import Event, append_event, read_events
 from .ingest import build_manual_draft, discover, parse_manual, parse_result_file
+from .llm import LLMUnavailable, complete
 from .planning import (
     ValidationFailed,
     build_design_draft,
@@ -184,6 +190,64 @@ def plan(
 
     typer.echo(f"批次 {batch_id} 已锁定，{len(runs)} 条预测已写入。")
     typer.echo("跑完实验后运行 ari result 录入结果。")
+
+    # 到这里预测才落盘，现在才允许问 AI。见 spec §4.2 的锚定效应。
+    try:
+        advice = advise(root, design, runs)
+    except LLMUnavailable as exc:
+        typer.echo(f"（这次没有 AI 的那份判断：{exc}）")
+        return
+
+    append_event(
+        runs_path,
+        Event(
+            ts=_now(),
+            type="note",
+            batch=batch_id,
+            payload={"kind": "ai_advice", "advice": advice},
+        ),
+    )
+    _show_advice(advice)
+
+
+def advise(root: Path, design, runs: list[str]) -> dict:
+    """问一次 AI 的定性判断。任何问题都抛 LLMUnavailable。
+
+    单独提出来是为了让接线测试能整体替换它——测试不该碰网络。
+    """
+    ref = resolve_role(load_config(root), "reason")
+    advice = complete(
+        ref,
+        ADVICE_SYSTEM,
+        build_advice_prompt(design.hypothesis, design.dimensions, runs, design.metrics),
+        ADVICE_SCHEMA,
+    )
+    return check_advice(advice, runs)
+
+
+def _show_advice(advice: dict) -> None:
+    """并排展示。分歧本身就是有信息量的信号——见 spec §4.2。"""
+    console = Console()
+    console.print()
+    console.print("[bold]AI 的判断[/bold]（只给方向，不给数值）")
+
+    console.print("\n[bold]预期排序[/bold]（好 → 差）")
+    for position, run in enumerate(advice.get("ranking") or [], start=1):
+        console.print(f"  {position}. {run}")
+
+    directions = advice.get("directions") or []
+    if directions:
+        console.print("\n[bold]变量的影响[/bold]")
+        for item in directions:
+            console.print(f"  {item['variable']}：{item['effect']}")
+
+    confounders = advice.get("confounders") or []
+    if confounders:
+        console.print("\n[bold]可能没考虑到的混淆因素[/bold]")
+        for item in confounders:
+            console.print(f"  · {item}")
+
+    console.print("\n[dim]和你自己的预测不一致的地方，本身就是有信息量的信号。[/dim]")
 
 
 def _preset_dimensions(draft: str, dimensions: dict[str, list[str]]) -> str:

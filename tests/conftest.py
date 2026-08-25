@@ -14,6 +14,19 @@ BATCH = "b1"
 RUN = "model=large"
 
 
+@pytest.fixture(autouse=True)
+def _no_real_api_keys(monkeypatch):
+    """把 provider 的 API key 环境变量从所有测试里摘掉。
+
+    spec §9：CI 不打真实 API。config.toml 模板里是真实的模型名，只要开发
+    机上恰好导出了 ANTHROPIC_API_KEY，`ari plan` 的测试就会真的发一次请求
+    ——花钱、变慢、结果不确定，而且没有任何一条断言会因此变红，你根本不会
+    发现。需要 key 的测试自己 setenv，晚于本 fixture 生效。
+    """
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def make_batch_opened(**overrides) -> Event:
     payload = {
         "hypothesis": "large 比 base 好",
