@@ -229,7 +229,7 @@ def main() -> None:
         width=1280,
         height=820,
         min_size=(900, 640),
-        background_color="#f4f2ed",
+        background_color="#f6f7f9",
         text_select=True,
     )
     bridge.bind(window)

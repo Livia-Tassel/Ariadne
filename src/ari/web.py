@@ -24,7 +24,14 @@ from urllib.parse import urlsplit
 from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
+from .ideas import make_idea_id, project_ideas
 from .metrics import MetricSpec, default_spec
+from .papers import (
+    SECTIONS,
+    next_draft_id,
+    project_drafts,
+    render_markdown as render_draft_markdown,
+)
 from .planning import Design, build_events, expand_runs, next_batch_id
 from .project import closure_blockers, project as project_events
 from .reviewing import build_reflection_events, deviation_lines, pending
@@ -69,7 +76,10 @@ class GuiService:
         events, parse_errors = read_events(self.runs_path)
         batches, warnings = project_events(events)
         ledger, belief_warnings = project_beliefs(events)
-        return events, parse_errors, batches, warnings + belief_warnings, ledger
+        ideas, idea_warnings = project_ideas(events)
+        drafts, draft_warnings = project_drafts(events)
+        all_warnings = warnings + belief_warnings + idea_warnings + draft_warnings
+        return events, parse_errors, batches, all_warnings, ledger, ideas, drafts
 
     def preview_runs(self, payload: dict) -> dict:
         dimensions = self._dimensions(payload.get("dimensions"))
@@ -92,7 +102,8 @@ class GuiService:
         metric_names, metric_specs = self._metrics(payload.get("metrics"))
         predictions = self._predictions(payload.get("predictions"), runs, metric_names)
 
-        events, _, batches, _, _ = self._load()
+        _, _, batches, _, _, ideas, _ = self._load()
+        idea_ref = self._idea_reference(payload.get("idea"), ideas)
         batch_id = next_batch_id(batches)
         design = Design(
             hypothesis=hypothesis,
@@ -102,6 +113,7 @@ class GuiService:
             result_path=None,
             expected_ranking=None,
             research_direction=research_direction,
+            idea=idea_ref,
         )
         new_events = build_events(batch_id, design, predictions, now=_now())
         with self._write_lock:
@@ -120,7 +132,7 @@ class GuiService:
         if not isinstance(raw_rows, list) or not raw_rows:
             raise GuiInputError("至少填写一条实验结果")
 
-        _, _, batches, _, _ = self._load()
+        _, _, batches, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -185,7 +197,7 @@ class GuiService:
         cause = _text(payload.get("cause"), "原因分析")
         nxt = _text(payload.get("next"), "下一步", required=False)
 
-        events, _, batches, _, ledger = self._load()
+        _, _, batches, _, ledger, _, _ = self._load()
         batch = batches.get(batch_id)
         run = batch.runs.get(run_key) if batch else None
         if run is None:
@@ -211,7 +223,7 @@ class GuiService:
         cause = _text(payload.get("cause"), "批次结论")
         nxt = _text(payload.get("next"), "下一步", required=False)
 
-        _, _, batches, _, ledger = self._load()
+        _, _, batches, _, ledger, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -235,7 +247,7 @@ class GuiService:
         return {"ok": True, "written": len(new_events)}
 
     def state(self) -> dict:
-        _, parse_errors, batches, warnings, ledger = self._load()
+        _, parse_errors, batches, warnings, ledger, ideas, drafts = self._load()
         serialized_batches = [self._batch_json(batch) for batch in reversed(list(batches.values()))]
         pending_runs = [
             {
@@ -258,6 +270,21 @@ class GuiService:
             }
             for belief in ledger.values()
         ]
+        serialized_ideas = [
+            {
+                "id": idea.id,
+                "text": idea.text,
+                "motivation": idea.motivation,
+                "status": idea.status(batches),
+                "discarded": idea.discarded,
+                "discard_reason": idea.discard_reason,
+                "batches": idea.batches,
+                "added_ts": idea.added_ts,
+            }
+            for idea in reversed(list(ideas.values()))
+        ]
+        serialized_drafts = [self._draft_json(draft) for draft in reversed(list(drafts.values()))]
+        open_ideas = sum(1 for idea in ideas.values() if idea.status(batches) == "待验证")
         all_runs = [run for batch in batches.values() for run in batch.runs.values()]
         counts = {verdict.value: 0 for verdict in Verdict}
         for run in all_runs:
@@ -270,12 +297,187 @@ class GuiService:
                 "runs": len(all_runs),
                 "pending_reviews": len(pending_runs),
                 "verdicts": counts,
+                "ideas": len(ideas),
+                "open_ideas": open_ideas,
+                "drafts": len(drafts),
             },
             "batches": serialized_batches,
             "pending_reviews": pending_runs,
             "beliefs": beliefs,
+            "ideas": serialized_ideas,
+            "drafts": serialized_drafts,
+            "sections": [{"name": name, "label": label} for name, label in SECTIONS],
             "warnings": warnings,
             "parse_errors": [asdict(error) for error in parse_errors],
+        }
+
+    # ---------- 想法 ----------
+
+    def add_idea(self, payload: dict) -> dict:
+        text = _text(payload.get("text"), "想法内容")
+        motivation = _text(payload.get("motivation"), "动机", required=False)
+        _, _, _, _, _, ideas, _ = self._load()
+        existing = {idea.id: idea.text for idea in ideas.values()}
+        try:
+            idea_id = make_idea_id(text, existing)
+        except ValueError as exc:
+            raise GuiInputError(str(exc)) from exc
+        if idea_id in ideas:
+            raise GuiInputError("这个想法已经在账本里了", 409)
+        event = Event(
+            ts=_now(),
+            type="idea_captured",
+            payload={"id": idea_id, "text": " ".join(text.split()), "motivation": motivation},
+        )
+        with self._write_lock:
+            append_event(self.runs_path, event)
+        return {"ok": True, "idea": idea_id}
+
+    def discard_idea(self, payload: dict) -> dict:
+        idea_id = _text(payload.get("idea"), "想法")
+        reason = _text(payload.get("reason"), "放弃原因", required=False)
+        _, _, batches, _, _, ideas, _ = self._load()
+        idea = ideas.get(idea_id)
+        if idea is None:
+            raise GuiInputError(f"找不到想法 {idea_id}", 404)
+        if idea.discarded:
+            raise GuiInputError("这个想法已经放弃了", 409)
+        if any(not batches[b].closed for b in idea.batches if b in batches):
+            raise GuiInputError("想法还有未收口的实验批次，先收口或放弃那些批次", 409)
+        event = Event(
+            ts=_now(),
+            type="idea_discarded",
+            payload={"id": idea_id, "reason": reason},
+        )
+        with self._write_lock:
+            append_event(self.runs_path, event)
+        return {"ok": True, "idea": idea_id}
+
+    @staticmethod
+    def _idea_reference(raw, ideas) -> str:
+        idea_id = (raw or "").strip() if isinstance(raw, str) else ""
+        if not idea_id:
+            return ""
+        if idea_id not in ideas:
+            raise GuiInputError(f"找不到想法 {idea_id}")
+        return idea_id
+
+    # ---------- 论文 ----------
+
+    def create_draft(self, payload: dict) -> dict:
+        title = _text(payload.get("title"), "论文标题")
+        venue = _text(payload.get("venue"), "目标期刊或会议", required=False)
+        _, _, _, _, _, _, drafts = self._load()
+        draft_id = next_draft_id(drafts)
+        event = Event(
+            ts=_now(),
+            type="draft_opened",
+            payload={"draft": draft_id, "title": title, "venue": venue},
+        )
+        with self._write_lock:
+            current, _ = read_events(self.runs_path)
+            current_drafts, _ = project_drafts(current)
+            if next_draft_id(current_drafts) != draft_id:
+                raise GuiInputError("项目刚刚在另一个窗口中发生了变化，请刷新后再提交", 409)
+            append_event(self.runs_path, event)
+        return {"ok": True, "draft": draft_id}
+
+    def save_section(self, payload: dict) -> dict:
+        draft_id = _text(payload.get("draft"), "草稿")
+        section = _text(payload.get("section"), "章节")
+        text = _text(payload.get("text"), "章节内容", required=False)
+        _, _, batches, _, ledger, ideas, drafts = self._load()
+        draft = drafts.get(draft_id)
+        if draft is None:
+            raise GuiInputError(f"找不到草稿 {draft_id}", 404)
+        if section not in dict(SECTIONS):
+            raise GuiInputError(f"未知章节 {section}")
+        materials = self._materials(payload.get("materials"), batches, ledger, ideas)
+        event = Event(
+            ts=_now(),
+            type="section_saved",
+            payload={
+                "draft": draft_id,
+                "section": section,
+                "text": text,
+                "materials": materials,
+            },
+        )
+        with self._write_lock:
+            append_event(self.runs_path, event)
+        return {"ok": True, "draft": draft_id, "section": section}
+
+    def set_draft_status(self, payload: dict) -> dict:
+        draft_id = _text(payload.get("draft"), "草稿")
+        status = _text(payload.get("status"), "草稿状态")
+        _, _, _, _, _, _, drafts = self._load()
+        draft = drafts.get(draft_id)
+        if draft is None:
+            raise GuiInputError(f"找不到草稿 {draft_id}", 404)
+        allowed = {"writing": "撰写中", "submitted": "已投稿", "published": "已发表"}
+        if status not in allowed and status not in allowed.values():
+            raise GuiInputError(f"草稿状态不正确：{status}")
+        value = status if status in allowed else next(k for k, v in allowed.items() if v == status)
+        event = Event(
+            ts=_now(),
+            type="draft_status_changed",
+            payload={"draft": draft_id, "status": value},
+        )
+        with self._write_lock:
+            append_event(self.runs_path, event)
+        return {"ok": True, "draft": draft_id, "status": allowed[value]}
+
+    def export_draft(self, payload: dict) -> dict:
+        draft_id = _text(payload.get("draft"), "草稿")
+        _, _, _, _, _, _, drafts = self._load()
+        draft = drafts.get(draft_id)
+        if draft is None:
+            raise GuiInputError(f"找不到草稿 {draft_id}", 404)
+        return {"ok": True, "draft": draft_id, "markdown": render_draft_markdown(draft)}
+
+    @staticmethod
+    def _materials(raw, batches, ledger, ideas) -> list[dict]:
+        if raw in (None, ""):
+            return []
+        if not isinstance(raw, list):
+            raise GuiInputError("素材引用格式不正确")
+        materials: list[dict] = []
+        for index, item in enumerate(raw, start=1):
+            if not isinstance(item, dict) or len(item) != 1:
+                raise GuiInputError(f"第 {index} 条素材引用格式不正确")
+            if "batch" in item:
+                if item["batch"] not in batches:
+                    raise GuiInputError(f"素材引用了不存在的批次 {item['batch']}")
+                materials.append({"batch": str(item["batch"])})
+            elif "belief" in item:
+                if item["belief"] not in ledger:
+                    raise GuiInputError(f"素材引用了不存在的信念 {item['belief']}")
+                materials.append({"belief": str(item["belief"])})
+            elif "idea" in item:
+                if item["idea"] not in ideas:
+                    raise GuiInputError(f"素材引用了不存在的想法 {item['idea']}")
+                materials.append({"idea": str(item["idea"])})
+            else:
+                raise GuiInputError(f"第 {index} 条素材引用格式不正确")
+        return materials
+
+    @staticmethod
+    def _draft_json(draft) -> dict:
+        return {
+            "id": draft.id,
+            "title": draft.title,
+            "venue": draft.venue,
+            "status": draft.status,
+            "opened_ts": draft.opened_ts,
+            "sections": [
+                {
+                    "name": section.name,
+                    "text": section.text,
+                    "materials": section.materials,
+                    "saved_ts": section.saved_ts,
+                }
+                for section in draft.ordered_sections()
+            ],
         }
 
     @staticmethod
@@ -472,6 +674,7 @@ class GuiService:
             "id": batch.id,
             "research_direction": batch.research_direction,
             "hypothesis": batch.hypothesis,
+            "idea": batch.idea,
             "dimensions": batch.dimensions,
             "metrics": metric_names,
             "metric_specs": batch.metric_specs,
@@ -492,6 +695,12 @@ _POST_ROUTES = {
     "/api/results": "add_results",
     "/api/reviews": "add_review",
     "/api/batches/close": "close_batch",
+    "/api/ideas": "add_idea",
+    "/api/ideas/discard": "discard_idea",
+    "/api/drafts": "create_draft",
+    "/api/drafts/section": "save_section",
+    "/api/drafts/status": "set_draft_status",
+    "/api/drafts/export": "export_draft",
 }
 
 _STATIC = {

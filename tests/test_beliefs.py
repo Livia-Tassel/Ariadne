@@ -51,8 +51,8 @@ def test_empty_text_is_rejected():
         make_belief_id("   \n  ")
 
 
-def test_normalize_text_collapses_whitespace():
-    assert normalize_text("  a\n\n  b  ") == "a b"
+def test_normalize_text_ignores_whitespace():
+    assert normalize_text("  a\n\n  b  ") == "ab"
 
 
 def _added(belief_id, text, ts="2026-08-24T10:00:00+08:00", batch="b1", run="model=large"):

@@ -28,8 +28,9 @@ CHANGE_TYPES = {
 
 
 def normalize_text(text: str) -> str:
-    """折叠空白。同一句话换个换行位置不该变成另一条信念。"""
-    return " ".join(text.split())
+    """空白不参与身份。中文的换行可以落在任意字符之间，粘贴来的
+    文本不该因为换行或空格位置不同就变成另一条信念。"""
+    return "".join(text.split())
 
 
 def make_belief_id(text: str, existing: dict[str, str] | None = None) -> str:

@@ -188,7 +188,7 @@ def test_http_server_serves_the_app_and_json_api(http_gui):
         html = response.read().decode()
         assert response.status == 200
         assert "Ariadne" in html
-        assert "设计新实验" in html
+        assert "新实验" in html
 
     with _open(http_gui + "/api/state", timeout=3) as response:
         state = json.loads(response.read())

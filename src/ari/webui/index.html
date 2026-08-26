@@ -4,148 +4,141 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>Ariadne · 实验工作台</title>
+    <title>Ariadne · 科研工作台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">A</div>
-          <div><strong>Ariadne</strong><span>实验工作台</span></div>
-        </div>
-        <nav aria-label="主导航">
-          <button class="nav-item active" data-view="overview"><span>⌂</span>总览</button>
-          <button class="nav-item" data-view="plan"><span>＋</span>新实验</button>
-          <button class="nav-item" data-view="results"><span>↗</span>录入结果</button>
-          <button class="nav-item" data-view="reviews">
-            <span>◇</span>复盘 <b id="review-count" class="nav-count" hidden>0</b>
-          </button>
-          <button class="nav-item" data-view="beliefs"><span>✦</span>信念</button>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#/">
+          <span class="brand-mark" aria-hidden="true">A</span>
+          <span class="brand-text"><strong>Ariadne</strong><small>科研工作台</small></span>
+        </a>
+
+        <a class="btn primary sidebar-new" href="#/new">＋ 新实验</a>
+
+        <nav class="nav" aria-label="主导航">
+          <a class="nav-link" href="#/" data-nav="dashboard"><span class="nav-ico" aria-hidden="true">◍</span>工作台</a>
+          <a class="nav-link" href="#/ideas" data-nav="ideas"><span class="nav-ico" aria-hidden="true">◎</span>想法<b class="nav-count quiet" id="nav-ideas" hidden>0</b></a>
+          <a class="nav-link" href="#/experiments" data-nav="experiments"><span class="nav-ico" aria-hidden="true">▤</span>实验批次<b class="nav-count" id="nav-batches" hidden>0</b></a>
+          <a class="nav-link" href="#/beliefs" data-nav="beliefs"><span class="nav-ico" aria-hidden="true">✦</span>信念<b class="nav-count quiet" id="nav-beliefs" hidden>0</b></a>
+          <a class="nav-link" href="#/paper" data-nav="paper"><span class="nav-ico" aria-hidden="true">✎</span>论文<b class="nav-count quiet" id="nav-paper" hidden>0</b></a>
         </nav>
+
         <div class="sidebar-foot">
-          <button id="switch-project" class="switch-project" hidden>⇄ 切换研究目录</button>
-          <span class="status-dot"></span><span>本地运行 · 数据留在你的电脑</span>
-          <small id="project-path"></small>
+          <button id="switch-project" class="link-btn" hidden>⇄ 切换研究目录</button>
+          <p class="local-note"><span class="dot" aria-hidden="true"></span>本地运行 · 数据留在你的电脑</p>
+          <small id="project-path" class="path"></small>
         </div>
       </aside>
 
-      <main>
+      <div class="main-wrap">
         <header class="topbar">
-          <button id="mobile-menu" class="icon-button" aria-label="打开导航">☰</button>
-          <div>
-            <p class="eyebrow" id="page-eyebrow">实验总览</p>
-            <h1 id="page-title">把意外变成知识</h1>
+          <button id="mobile-menu" class="icon-btn" aria-label="打开导航">☰</button>
+          <div class="topbar-title">
+            <h1 id="page-title">工作台</h1>
+            <p id="page-sub">先预测，再验证——把意外变成知识</p>
           </div>
-          <button class="primary compact" data-go="plan">＋ 新实验</button>
         </header>
 
-        <div id="loading" class="loading"><span></span>正在读取实验记录…</div>
+        <div id="loading" class="loading"><span class="spin" aria-hidden="true"></span>正在读取实验记录…</div>
 
-        <section id="view-overview" class="view active" aria-labelledby="page-title">
-          <div class="hero-card">
-            <div>
-              <p class="kicker">YOUR RESEARCH LOOP</p>
-              <h2>先预测，再验证。</h2>
-              <p>把实验前的判断锁定下来，结果出现偏差时，Ariadne 会把最值得复盘的地方推到你面前。</p>
-            </div>
-            <div class="loop-visual" aria-label="预测到复盘的闭环">
-              <span class="active">预测</span><i>→</i><span>实测</span><i>→</i><span>复盘</span><i>↺</i>
-            </div>
-          </div>
-
-          <div class="stats-grid">
-            <article class="stat"><span>实验批次</span><strong id="stat-batches">0</strong><small>已设计</small></article>
-            <article class="stat"><span>Run</span><strong id="stat-runs">0</strong><small>预测已锁定</small></article>
-            <article class="stat accent"><span>待复盘</span><strong id="stat-reviews">0</strong><small>最有信息量</small></article>
-            <article class="stat"><span>信念</span><strong id="stat-beliefs">0</strong><small>持续演化</small></article>
-          </div>
-
-          <div class="section-heading">
-            <div><p class="eyebrow">BATCHES</p><h2>实验批次</h2></div>
-            <button class="secondary compact" data-go="plan">设计新批次</button>
-          </div>
-          <div id="batch-list"></div>
+        <section id="view-dashboard" class="view">
+          <div id="dash-actions"></div>
+          <div id="dash-stats" class="stats"></div>
+          <div class="section-head"><h2>实验批次</h2><a class="link" href="#/experiments">查看全部</a></div>
+          <div id="dash-batches"></div>
         </section>
 
-        <section id="view-plan" class="view">
-          <div class="section-heading wide">
-            <div><p class="eyebrow">PLAN BEFORE YOU RUN</p><h2>设计新实验</h2><p>先描述问题，再生成可横向比较的预测表。</p></div>
-            <div class="step-indicator"><span class="active">1 设计</span><i></i><span id="step-prediction">2 预测</span></div>
+        <section id="view-ideas" class="view">
+          <form id="idea-form" class="card form-card" novalidate>
+            <div class="form-head">
+              <h3>记下一个想法</h3>
+              <p>研究从念头开始。先别管怎么验证，把它留住。</p>
+            </div>
+            <div class="field">
+              <label for="idea-text">这个想法是什么？</label>
+              <textarea id="idea-text" rows="2" placeholder="例如：large 模型在小数据集上可能更受益于数据增强" required></textarea>
+            </div>
+            <div class="field">
+              <label for="idea-motivation">为什么值得追？<span class="muted">（可留空）</span></label>
+              <input id="idea-motivation" placeholder="例如：容量与正则化的交互还没人系统比较过" />
+            </div>
+            <div id="idea-error" class="form-error" hidden></div>
+            <div class="form-actions"><button type="submit" class="btn primary">保存想法</button></div>
+          </form>
+          <div id="idea-list"></div>
+        </section>
+
+        <section id="view-experiments" class="view"><div id="experiment-list"></div></section>
+
+        <section id="view-batch" class="view"><div id="batch-detail"></div></section>
+
+        <section id="view-new" class="view">
+          <div class="steps">
+            <span class="step active" data-step="design"><i>1</i>研究问题与设计</span><em aria-hidden="true"></em>
+            <span class="step" data-step="prediction"><i>2</i>锁定预测</span>
           </div>
 
-          <form id="plan-form" class="form-stack">
-            <article class="panel form-panel">
-              <div class="panel-number">01</div>
-              <div class="panel-body">
+          <form id="plan-form" novalidate>
+            <div id="idea-link" class="card idea-link" hidden></div>
+            <div class="card form-card">
+              <div class="form-head">
                 <h3>研究问题</h3>
-                <p class="field-help">写给三个月后的自己。研究方向提供上下文，假设必须能被这一批实验检验。</p>
-                <label>感兴趣的研究方向<input id="research-direction" name="research_direction" placeholder="例如：小数据集上的视觉模型正则化" required /></label>
-                <label>这一轮的实验假设<textarea id="hypothesis" name="hypothesis" rows="4" placeholder="例如：在同等训练预算下，更强的数据增强会改善 large 模型的泛化，但对 base 模型收益有限。" required></textarea></label>
+                <p>写给三个月后的自己：研究方向提供上下文，假设必须能被这一批实验检验。</p>
               </div>
-            </article>
+              <div class="field">
+                <label for="research-direction">感兴趣的研究方向</label>
+                <input id="research-direction" name="research_direction" placeholder="例如：小数据集上的视觉模型正则化" required />
+              </div>
+              <div class="field">
+                <label for="hypothesis">这一轮的实验假设</label>
+                <textarea id="hypothesis" name="hypothesis" rows="3" placeholder="例如：在同等训练预算下，更强的数据增强会改善 large 模型的泛化，但对 base 模型收益有限。" required></textarea>
+              </div>
+            </div>
 
-            <article class="panel form-panel">
-              <div class="panel-number">02</div>
-              <div class="panel-body">
-                <div class="inline-heading"><div><h3>变量维度</h3><p class="field-help">每个维度的取值用逗号分隔，系统会生成笛卡尔积。</p></div><button type="button" class="text-button" id="add-dimension">＋ 添加变量</button></div>
-                <div id="dimension-rows" class="row-list"></div>
+            <div class="card form-card">
+              <div class="form-head spread">
+                <div><h3>变量维度</h3><p>每个维度的取值用逗号分隔，系统会生成全部组合（笛卡尔积）。</p></div>
+                <button type="button" class="btn ghost sm" id="add-dimension">＋ 添加变量</button>
               </div>
-            </article>
+              <div id="dimension-rows" class="row-list"></div>
+            </div>
 
-            <article class="panel form-panel">
-              <div class="panel-number">03</div>
-              <div class="panel-body">
-                <div class="inline-heading"><div><h3>观测指标</h3><p class="field-help">容差决定多大的偏差才算 SURPRISE；acc 类指标默认绝对容差 0.005。</p></div><button type="button" class="text-button" id="add-metric">＋ 添加指标</button></div>
-                <div id="metric-rows" class="row-list"></div>
+            <div class="card form-card">
+              <div class="form-head spread">
+                <div><h3>观测指标</h3><p>容差决定多大的偏差才算 SURPRISE；acc 类指标默认绝对容差 0.005。</p></div>
+                <button type="button" class="btn ghost sm" id="add-metric">＋ 添加指标</button>
               </div>
-            </article>
+              <div id="metric-rows" class="row-list"></div>
+            </div>
 
             <div id="plan-error" class="form-error" hidden></div>
-            <button type="button" id="preview-runs" class="primary action-button">生成预测表 <span>→</span></button>
+            <div class="form-actions"><button type="button" class="btn primary" id="preview-runs">生成预测表 →</button></div>
 
-            <article id="prediction-panel" class="panel prediction-panel" hidden>
-              <div class="panel-number">04</div>
-              <div class="panel-body">
+            <div class="card form-card" id="prediction-panel" hidden>
+              <div class="form-head">
                 <h3>锁定你的预测</h3>
-                <p class="field-help">预测可以是点值（0.83）或区间（0.80 ~ 0.84）。理由是必填项，它决定复盘时能否找到真正出错的假设。</p>
-                <div class="table-scroll"><table class="data-table prediction-table"><thead id="prediction-head"></thead><tbody id="prediction-body"></tbody></table></div>
-                <div class="lock-note"><span>⌁</span><div><strong>保存后预测不会被覆盖</strong><small>后续修订会保留原值，避免实验完成后补写预测。</small></div></div>
-                <button type="submit" class="primary action-button">锁定预测并创建批次</button>
+                <p>预测可以是点值（0.83）或区间（0.80 ~ 0.84）。理由必填——它决定复盘时能否找到真正出错的假设。</p>
               </div>
-            </article>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead id="prediction-head"></thead>
+                  <tbody id="prediction-body"></tbody>
+                </table>
+              </div>
+              <div class="callout"><strong>保存后预测不会被覆盖</strong><span>后续修订会保留原值，避免实验完成后补写预测。</span></div>
+              <div class="form-actions"><button type="submit" class="btn primary">锁定预测并创建批次</button></div>
+            </div>
           </form>
         </section>
 
-        <section id="view-results" class="view">
-          <div class="section-heading wide"><div><p class="eyebrow">RECORD RESULTS</p><h2>录入实验结果</h2><p>一次录入一个 run 与 seed。已有 seed 不会被静默覆盖。</p></div></div>
-          <article class="panel simple-form">
-            <form id="result-form">
-              <div class="form-grid two">
-                <label>实验批次<select id="result-batch" required></select></label>
-                <label>Run<select id="result-run" required></select></label>
-              </div>
-              <label>Seed<input id="result-seed" type="number" step="1" value="0" required /></label>
-              <div id="result-metrics" class="form-grid"></div>
-              <div id="result-error" class="form-error" hidden></div>
-              <button class="primary action-button" type="submit">保存结果并重新判定</button>
-            </form>
-          </article>
-          <div id="recent-results"></div>
-        </section>
+        <section id="view-beliefs" class="view"><div id="belief-list"></div></section>
 
-        <section id="view-reviews" class="view">
-          <div class="section-heading wide"><div><p class="eyebrow">TURN SURPRISE INTO KNOWLEDGE</p><h2>复盘意外</h2><p>这里只出现真正超出预测范围、且还没有解释的 run。</p></div></div>
-          <div id="review-list"></div>
-          <div class="section-heading sub"><div><p class="eyebrow">CLOSE THE LOOP</p><h2>批次收口</h2></div></div>
-          <div id="close-list"></div>
-        </section>
+        <section id="view-paper" class="view"><div id="paper-list"></div></section>
 
-        <section id="view-beliefs" class="view">
-          <div class="section-heading wide"><div><p class="eyebrow">BELIEF LEDGER</p><h2>信念账本</h2><p>实验会结束，能够指导下一次预测的判断应该留下来。</p></div></div>
-          <div id="belief-list" class="belief-grid"></div>
-        </section>
-      </main>
+        <section id="view-draft" class="view"><div id="draft-detail"></div></section>
+      </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
