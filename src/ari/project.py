@@ -31,6 +31,12 @@ _KNOWN_TYPES = {
     "belief_reinforced",
     "belief_refuted",
     "note",
+    # 以下类型不属于批次投影，由 ideas.py / papers.py 单独投影。
+    "idea_captured",
+    "idea_discarded",
+    "draft_opened",
+    "section_saved",
+    "draft_status_changed",
 }
 
 LOW_INFORMATION_SIGNAL = "本批次全部命中预期，未产生新信息——变量取值范围可能过于保守"
@@ -59,6 +65,7 @@ class BatchState:
     id: str
     research_direction: str = ""
     hypothesis: str = ""
+    idea: str = ""
     dimensions: dict = field(default_factory=dict)
     metric_specs: dict = field(default_factory=dict)
     expected_ranking: dict | None = None
@@ -99,6 +106,7 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
                 id=event.batch,
                 research_direction=event.payload.get("research_direction", ""),
                 hypothesis=event.payload.get("hypothesis", ""),
+                idea=(event.payload.get("idea") or "").strip(),
                 dimensions=event.payload.get("dimensions", {}),
                 metric_specs=event.payload.get("metric_specs", {}),
                 expected_ranking=event.payload.get("expected_ranking"),
@@ -107,8 +115,13 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             )
             continue
 
-        if event.type == "note" or event.type.startswith("belief_"):
-            continue  # 信念跨批次存活，由 beliefs.py 单独投影
+        if (
+            event.type == "note"
+            or event.type.startswith("belief_")
+            or event.type.startswith("idea_")
+            or event.type.startswith("draft_")
+        ):
+            continue  # 信念/想法/草稿跨批次存活，由各自模块单独投影
 
         batch = batches.get(event.batch)
         if batch is None:

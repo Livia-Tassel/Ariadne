@@ -19,8 +19,10 @@
 
         <nav class="nav" aria-label="主导航">
           <a class="nav-link" href="#/" data-nav="dashboard"><span class="nav-ico" aria-hidden="true">◍</span>工作台</a>
+          <a class="nav-link" href="#/ideas" data-nav="ideas"><span class="nav-ico" aria-hidden="true">◎</span>想法<b class="nav-count quiet" id="nav-ideas" hidden>0</b></a>
           <a class="nav-link" href="#/experiments" data-nav="experiments"><span class="nav-ico" aria-hidden="true">▤</span>实验批次<b class="nav-count" id="nav-batches" hidden>0</b></a>
           <a class="nav-link" href="#/beliefs" data-nav="beliefs"><span class="nav-ico" aria-hidden="true">✦</span>信念<b class="nav-count quiet" id="nav-beliefs" hidden>0</b></a>
+          <a class="nav-link" href="#/paper" data-nav="paper"><span class="nav-ico" aria-hidden="true">✎</span>论文<b class="nav-count quiet" id="nav-paper" hidden>0</b></a>
         </nav>
 
         <div class="sidebar-foot">
@@ -48,6 +50,26 @@
           <div id="dash-batches"></div>
         </section>
 
+        <section id="view-ideas" class="view">
+          <form id="idea-form" class="card form-card" novalidate>
+            <div class="form-head">
+              <h3>记下一个想法</h3>
+              <p>研究从念头开始。先别管怎么验证，把它留住。</p>
+            </div>
+            <div class="field">
+              <label for="idea-text">这个想法是什么？</label>
+              <textarea id="idea-text" rows="2" placeholder="例如：large 模型在小数据集上可能更受益于数据增强" required></textarea>
+            </div>
+            <div class="field">
+              <label for="idea-motivation">为什么值得追？<span class="muted">（可留空）</span></label>
+              <input id="idea-motivation" placeholder="例如：容量与正则化的交互还没人系统比较过" />
+            </div>
+            <div id="idea-error" class="form-error" hidden></div>
+            <div class="form-actions"><button type="submit" class="btn primary">保存想法</button></div>
+          </form>
+          <div id="idea-list"></div>
+        </section>
+
         <section id="view-experiments" class="view"><div id="experiment-list"></div></section>
 
         <section id="view-batch" class="view"><div id="batch-detail"></div></section>
@@ -59,6 +81,7 @@
           </div>
 
           <form id="plan-form" novalidate>
+            <div id="idea-link" class="card idea-link" hidden></div>
             <div class="card form-card">
               <div class="form-head">
                 <h3>研究问题</h3>
@@ -111,6 +134,10 @@
         </section>
 
         <section id="view-beliefs" class="view"><div id="belief-list"></div></section>
+
+        <section id="view-paper" class="view"><div id="paper-list"></div></section>
+
+        <section id="view-draft" class="view"><div id="draft-detail"></div></section>
       </div>
     </div>
 

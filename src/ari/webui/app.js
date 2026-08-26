@@ -10,7 +10,7 @@ const app = {
   state: null,
   route: { view: "dashboard" },
   pendingScroll: null, // 仅 hash 跳转时置位，刷新数据后的重渲染不滚动
-  plan: { runs: [], metrics: [] },
+  plan: { runs: [], metrics: [], idea: "" },
 };
 
 /* ---------- 基础工具 ---------- */
@@ -125,24 +125,33 @@ function nextSeed(run) {
 
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, "");
-  const parts = raw.split("/").filter(Boolean).map(decodeURIComponent);
-  if (!parts.length) return { view: "dashboard" };
-  if (parts[0] === "experiments") return { view: "experiments" };
-  if (parts[0] === "beliefs") return { view: "beliefs" };
-  if (parts[0] === "new") return { view: "new" };
-  if (parts[0] === "batch" && parts[1]) {
-    return { view: "batch", batch: parts[1], run: parts[2] === "run" ? parts[3] : null };
+  const [pathPart, queryPart] = raw.split("?");
+  const params = new URLSearchParams(queryPart || "");
+  const parts = pathPart.split("/").filter(Boolean).map(decodeURIComponent);
+  if (!parts.length) return { view: "dashboard", params };
+  if (parts[0] === "experiments") return { view: "experiments", params };
+  if (parts[0] === "beliefs") return { view: "beliefs", params };
+  if (parts[0] === "ideas") return { view: "ideas", params };
+  if (parts[0] === "paper") {
+    return { view: parts[1] ? "draft" : "paper", draft: parts[1], params };
   }
-  return { view: "dashboard" };
+  if (parts[0] === "new") return { view: "new", params };
+  if (parts[0] === "batch" && parts[1]) {
+    return { view: "batch", batch: parts[1], run: parts[2] === "run" ? parts[3] : null, params };
+  }
+  return { view: "dashboard", params };
 }
 
 function go(hash) { location.hash = hash; }
 
 const PAGE_META = {
-  dashboard: ["工作台", "先预测，再验证——把意外变成知识"],
+  dashboard: ["工作台", "从一个想法，到一篇论文——全程在这里"],
+  ideas: ["想法", "研究从念头开始。先把它留住，再决定要不要验证"],
   experiments: ["实验批次", "每一个批次是一次假设的检验"],
   new: ["新实验", "在开跑之前，先写下你对结果的判断"],
   beliefs: ["信念账本", "实验会结束，能指导下一次预测的判断会留下来"],
+  paper: ["论文", "实验结束时，材料已经在这里了"],
+  draft: ["论文草稿", ""],
 };
 
 /* ---------- 渲染调度 ---------- */
@@ -156,21 +165,38 @@ function render() {
 function renderCurrentView() {
   const view = app.route.view;
   $$(".view").forEach(node => node.classList.toggle("active", node.id === `view-${view}`));
-  const navKey = view === "batch" ? "experiments" : view;
+  const navKey = view === "batch" ? "experiments" : view === "draft" ? "paper" : view;
   $$(".nav-link").forEach(node => node.classList.toggle("active", node.dataset.nav === navKey));
   $("#sidebar").classList.remove("open");
 
   if (view === "dashboard") renderDashboard();
+  else if (view === "ideas") renderIdeas();
   else if (view === "experiments") renderExperiments();
   else if (view === "batch") renderBatch();
   else if (view === "new") renderPlanView();
   else if (view === "beliefs") renderBeliefs();
+  else if (view === "paper") renderPaper();
+  else if (view === "draft") renderDraft();
+}
+
+function updateNavCounts() {
+  const s = app.state;
+  const set = (id, value) => {
+    const node = $(id);
+    node.textContent = value;
+    node.hidden = !value;
+  };
+  set("#nav-ideas", s.summary.open_ideas);
+  set("#nav-batches", s.summary.batches);
+  set("#nav-beliefs", s.beliefs.length);
+  set("#nav-paper", s.summary.drafts);
 }
 
 async function refresh() {
   try {
     app.state = await api("/api/state");
     $("#project-path").textContent = app.state.project.path;
+    updateNavCounts();
     renderCurrentView();
   } catch (error) {
     toast(error.message, true);
@@ -233,6 +259,24 @@ function computeActions() {
       });
     }
   }
+  if (!actions.length) {
+    if (!s.batches.length && s.summary.open_ideas) {
+      actions.push({
+        tone: "neutral", icon: "◎",
+        title: `${s.summary.open_ideas} 个想法等着被验证`,
+        desc: "把一个想法推进成实验批次——开跑前锁定预测",
+        href: "#/ideas",
+      });
+    }
+    if (s.batches.length && s.batches.every(batch => batch.closed) && !s.summary.drafts) {
+      actions.push({
+        tone: "ok", icon: "✎",
+        title: "实验都已收口，可以开始写论文了",
+        desc: "批次结论与信念账本就是最原始的讨论材料",
+        href: "#/paper",
+      });
+    }
+  }
   return actions;
 }
 
@@ -251,19 +295,30 @@ function renderDashboard() {
     : actionsHtml(computeActions());
 
   $("#dash-stats").innerHTML = `
-    <div class="stat"><span>实验批次</span><strong>${s.summary.batches}</strong><small>已设计</small></div>
-    <div class="stat"><span>Run</span><strong>${s.summary.runs}</strong><small>预测已锁定</small></div>
+    <div class="stat"><span>想法</span><strong>${s.summary.ideas}</strong><small>${s.summary.open_ideas} 个待验证</small></div>
+    <div class="stat"><span>实验批次</span><strong>${s.summary.batches}</strong><small>${s.summary.runs} 个 run</small></div>
     <div class="stat accent"><span>待复盘</span><strong>${s.summary.pending_reviews}</strong><small>最有信息量</small></div>
-    <div class="stat"><span>信念</span><strong>${s.beliefs.length}</strong><small>持续演化</small></div>`;
+    <div class="stat"><span>信念</span><strong>${s.beliefs.length}</strong><small>持续演化</small></div>
+    <div class="stat"><span>论文草稿</span><strong>${s.summary.drafts}</strong><small>素材自然沉淀</small></div>`;
 
   const target = $("#dash-batches");
   if (!s.batches.length) {
+    if (!s.summary.ideas) {
+      target.innerHTML = emptyState({
+        icon: "◎",
+        title: "从一个想法开始",
+        body: "研究从念头开始：先把它记下来，再推进成实验——开跑前锁定预测，实验的差异才会变成知识，最后沉淀成论文。",
+        cta: "记下第一个想法",
+        href: "#/ideas",
+      });
+      return;
+    }
     target.innerHTML = emptyState({
       icon: "⌁",
-      title: "从一个你真正关心的问题开始",
-      body: "写下假设、设计变量与指标，Ariadne 会生成预测表。开跑前锁定预测，实验的差异才会变成知识。",
-      cta: "设计第一个实验",
-      href: "#/new",
+      title: "想法已经在账本上了",
+      body: "挑一个最值得追的，把它推进成实验批次：设计变量与指标，开跑前锁定预测。",
+      cta: "把想法变成实验",
+      href: "#/ideas",
     });
     return;
   }
@@ -326,6 +381,123 @@ function renderExperiments() {
   target.innerHTML = app.state.batches.map(batchRowHtml).join("");
 }
 
+/* ---------- 想法 ---------- */
+
+const IDEA_STATUS_BADGE = {
+  "待验证": "idea-open",
+  "实验中": "live",
+  "已验证": "done",
+  "已放弃": "retired",
+};
+
+function ideaCardHtml(idea) {
+  const badge = `<span class="badge ${IDEA_STATUS_BADGE[idea.status] || "idea-open"}">${esc(idea.status)}</span>`;
+  const batches = idea.batches.length
+    ? `<div class="idea-batches">${idea.batches.map(id =>
+        `<a class="chip" href="#/batch/${encodeURIComponent(id)}">${esc(id)}</a>`).join("")}</div>`
+    : "";
+  const motivation = idea.motivation ? `<p class="idea-motivation">${esc(idea.motivation)}</p>` : "";
+  const reason = idea.discarded && idea.discard_reason
+    ? `<p class="idea-motivation muted">放弃原因：${esc(idea.discard_reason)}</p>` : "";
+
+  let actions = "";
+  if (!idea.discarded) {
+    actions = `<div class="idea-actions">
+      <a class="btn primary sm" href="#/new?idea=${encodeURIComponent(idea.id)}">立项为实验 →</a>
+      <button type="button" class="btn ghost sm idea-discard" data-idea="${esc(idea.id)}">放弃</button>
+    </div>`;
+  }
+
+  return `<article class="card idea-card ${idea.discarded ? "retired" : ""}" data-idea="${esc(idea.id)}">
+    <div class="idea-top">${badge}<span class="belief-id">${esc(idea.id)}</span></div>
+    <h3>${esc(idea.text)}</h3>
+    ${motivation}
+    ${batches}
+    ${reason}
+    ${actions}
+    <form class="idea-discard-form" hidden>
+      <div class="field">
+        <label>为什么放弃？<span class="muted">（可留空，留给以后的自己）</span></label>
+        <input class="discard-reason" placeholder="例如：文献里已有系统比较" />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn danger sm">确认放弃</button>
+        <button type="button" class="btn ghost sm discard-cancel">再想想</button>
+      </div>
+      <div class="form-error" hidden></div>
+    </form>
+  </article>`;
+}
+
+function renderIdeas() {
+  const [title, sub] = PAGE_META.ideas;
+  $("#page-title").textContent = title;
+  $("#page-sub").textContent = sub;
+
+  const target = $("#idea-list");
+  const ideas = app.state.ideas;
+  if (!ideas.length) {
+    target.innerHTML = emptyState({
+      icon: "◎",
+      title: "想法账本还是空的",
+      body: "阅读、讨论、散步时冒出来的念头都值得先记下来——不着急判断值不值得做。",
+      cta: "在上方记下第一个想法",
+      href: "#/ideas",
+    });
+    return;
+  }
+  const active = ideas.filter(idea => !idea.discarded);
+  const retired = ideas.filter(idea => idea.discarded);
+  target.innerHTML = `
+    <div class="belief-section">
+      <div class="section-head"><h2>在追（${active.length}）</h2></div>
+      <div class="belief-grid">${active.map(ideaCardHtml).join("") || '<p class="muted" style="margin:0">暂无在追的想法。</p>'}</div>
+    </div>
+    ${retired.length ? `<div class="belief-section">
+      <div class="section-head"><h2>已放弃（${retired.length}）</h2></div>
+      <div class="belief-grid">${retired.map(ideaCardHtml).join("")}</div>
+    </div>` : ""}`;
+  bindIdeaCards();
+}
+
+function bindIdeaCards() {
+  $$("#idea-list .idea-discard").forEach(button => {
+    button.onclick = () => {
+      const card = button.closest(".idea-card");
+      $(".idea-actions", card).hidden = true;
+      $(".idea-discard-form", card).hidden = false;
+      $(".discard-reason", card).focus();
+    };
+  });
+  $$("#idea-list .discard-cancel").forEach(button => {
+    button.onclick = () => {
+      const card = button.closest(".idea-card");
+      $(".idea-discard-form", card).hidden = true;
+      $(".idea-actions", card).hidden = false;
+    };
+  });
+  $$("#idea-list .idea-discard-form").forEach(form => {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const errorNode = $(".form-error", form);
+      errorNode.hidden = true;
+      try {
+        await api("/api/ideas/discard", {
+          method: "POST",
+          body: JSON.stringify({
+            idea: form.closest(".idea-card").dataset.idea,
+            reason: $(".discard-reason", form).value,
+          }),
+        });
+        toast("想法已放入「已放弃」——这不是删除，以后还能翻到");
+        await refresh();
+      } catch (error) {
+        formError(errorNode, error);
+      }
+    };
+  });
+}
+
 /* ---------- 批次详情 ---------- */
 
 function renderBatch() {
@@ -352,6 +524,13 @@ function renderBatch() {
 
   const dimChips = Object.entries(batch.dimensions || {})
     .map(([name, values]) => `<span class="chip">${esc(name)} <b>${values.length}</b> 取值</span>`).join("");
+  const ideaChip = batch.idea
+    ? (() => {
+        const idea = app.state.ideas.find(item => item.id === batch.idea);
+        const label = idea ? idea.text : batch.idea;
+        return `<a class="chip idea-chip" href="#/ideas" title="${esc(label)}">◎ 想法 ${esc(batch.idea)}</a>`;
+      })()
+    : "";
   const specChips = Object.entries(batch.metric_specs || {})
     .map(([name, spec]) => `<span class="chip"><b>${esc(name)}</b> ${DIRECTION_LABEL[spec.direction] || spec.direction} · ${COMPARE_LABEL[spec.compare] || spec.compare} ${fmt(spec.tolerance)}</span>`).join("");
 
@@ -362,7 +541,7 @@ function renderBatch() {
         <div>
           <h2>${esc(batch.hypothesis)}</h2>
           <p class="batch-direction">${esc(batch.research_direction || "")}</p>
-          <div class="batch-chips">${dimChips}${specChips}</div>
+          <div class="batch-chips">${ideaChip}${dimChips}${specChips}</div>
         </div>
         <div class="head-badges">
           ${batch.closed ? '<span class="badge done">已收口</span>' : '<span class="badge live">进行中</span>'}
@@ -675,10 +854,44 @@ function renderPlanView() {
   const [title, sub] = PAGE_META.new;
   $("#page-title").textContent = title;
   $("#page-sub").textContent = sub;
+
+  const ideaId = app.route.params?.get("idea") || "";
+  if (ideaId && app.plan.idea !== ideaId) {
+    const idea = app.state.ideas.find(item => item.id === ideaId);
+    if (idea && !$("#hypothesis").value.trim()) {
+      $("#hypothesis").value = idea.text;
+      app.plan.idea = idea.id;
+      renderIdeaLinkChip(idea);
+    }
+  } else if (!ideaId && app.plan.idea) {
+    app.plan.idea = "";
+    renderIdeaLinkChip(null);
+  }
+
   if (!app.plan.runs.length) {
     $("#prediction-panel").hidden = true;
     setPlanStep("design");
   }
+}
+
+function renderIdeaLinkChip(idea) {
+  const chip = $("#idea-link");
+  if (!idea) {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = false;
+  chip.innerHTML = `<div class="form-head spread" style="margin:0">
+    <div>
+      <h3 style="margin:0">来自想法 ${esc(idea.id)}</h3>
+      <p style="margin:4px 0 0">${esc(idea.text)}${idea.motivation ? `——${esc(idea.motivation)}` : ""}</p>
+    </div>
+    <button type="button" class="btn ghost sm" id="unlink-idea">取消关联</button>
+  </div>`;
+  $("#unlink-idea").onclick = () => {
+    app.plan.idea = "";
+    chip.hidden = true;
+  };
 }
 
 function setPlanStep(step) {
@@ -804,6 +1017,7 @@ async function submitPlan(event) {
         dimensions: collectDimensions(),
         metrics: collectMetrics(),
         predictions,
+        idea: app.plan.idea || "",
       }),
     });
     toast(`批次 ${result.batch} 已创建，${result.run_count} 条预测已锁定`);
@@ -822,7 +1036,8 @@ function resetPlan() {
   $("#dimension-rows").innerHTML = dimensionRow("model", "base, large");
   $("#metric-rows").innerHTML = metricRow("top1_acc");
   bindRows($("#plan-form"));
-  app.plan = { runs: [], metrics: [] };
+  app.plan = { runs: [], metrics: [], idea: "" };
+  renderIdeaLinkChip(null);
   $("#prediction-panel").hidden = true;
   setPlanStep("design");
   $("#plan-error").hidden = true;
@@ -871,6 +1086,355 @@ function renderBeliefs() {
     </div>` : ""}`;
 }
 
+/* ---------- 论文 ---------- */
+
+const DRAFT_STATUS_OPTIONS = [
+  ["writing", "撰写中"],
+  ["submitted", "已投稿"],
+  ["published", "已发表"],
+];
+
+function draftCardHtml(draft) {
+  const sections = draft.sections || [];
+  const written = sections.filter(section => section.text.trim()).length;
+  const total = app.state.sections.length;
+  const materials = sections.reduce((sum, section) => sum + section.materials.length, 0);
+  const statusBadge = draft.status === "已发表"
+    ? "done" : draft.status === "已投稿" ? "live" : "idea-open";
+  return `<a class="card draft-card" href="#/paper/${encodeURIComponent(draft.id)}">
+    <div class="idea-top">
+      <span class="badge ${statusBadge}">${esc(draft.status)}</span>
+      <span class="belief-id">${esc(draft.id)}</span>
+    </div>
+    <h3>${esc(draft.title)}</h3>
+    <p class="idea-motivation">${esc(draft.venue || "未定目标期刊或会议")}</p>
+    <div class="draft-progress">
+      <span>${written}/${total} 节已动笔</span>
+      <span>·</span>
+      <span>${materials} 处素材引用</span>
+      <span>·</span>
+      <span>${dateLabel(draft.opened_ts)}</span>
+    </div>
+  </a>`;
+}
+
+function draftCreateCardHtml() {
+  return `<form id="draft-form" class="card form-card" novalidate>
+    <div class="form-head">
+      <h3>开始一份新草稿</h3>
+      <p>批次结论与信念账本会作为素材待引用——写作即整理。</p>
+    </div>
+    <div class="field">
+      <label for="draft-title">论文标题（工作标题即可）</label>
+      <input id="draft-title" placeholder="例如：小数据集上模型容量与数据增强的交互" required />
+    </div>
+    <div class="field">
+      <label for="draft-venue">目标期刊或会议<span class="muted">（可留空）</span></label>
+      <input id="draft-venue" placeholder="例如：NeurIPS / TMLR" />
+    </div>
+    <div id="draft-error" class="form-error" hidden></div>
+    <div class="form-actions"><button type="submit" class="btn primary">创建草稿</button></div>
+  </form>`;
+}
+
+function renderPaper() {
+  const [title, sub] = PAGE_META.paper;
+  $("#page-title").textContent = title;
+  $("#page-sub").textContent = sub;
+
+  const target = $("#paper-list");
+  const drafts = app.state.drafts;
+  if (!drafts.length) {
+    const hasMaterial = app.state.batches.some(batch => batch.closed) || app.state.beliefs.length;
+    target.innerHTML = (hasMaterial
+      ? emptyState({
+          icon: "✎",
+          title: "实验已收口，材料已备好",
+          body: "批次的结论、SURPRISE 的复盘与信念账本，就是讨论部分最原始的材料。从这里开始整理成论文。",
+          cta: "",
+          href: "",
+        })
+      : emptyState({
+          icon: "✎",
+          title: "论文工作区",
+          body: "从想法到实验再到论文，全程都在这里。实验陆续收口后，素材会自然沉淀下来供写作引用。",
+          cta: "",
+          href: "",
+        })) + draftCreateCardHtml();
+  } else {
+    target.innerHTML = `<div class="belief-grid">${drafts.map(draftCardHtml).join("")}</div>` + draftCreateCardHtml();
+  }
+  bindDraftForm();
+}
+
+function bindDraftForm() {
+  const form = $("#draft-form");
+  if (!form) return;
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const errorNode = $("#draft-error");
+    errorNode.hidden = true;
+    const button = $("button[type=submit]", form);
+    button.disabled = true;
+    try {
+      const result = await api("/api/drafts", {
+        method: "POST",
+        body: JSON.stringify({
+          title: $("#draft-title").value,
+          venue: $("#draft-venue").value,
+        }),
+      });
+      toast(`草稿 ${result.draft} 已创建`);
+      await refresh();
+      go(`#/paper/${encodeURIComponent(result.draft)}`);
+    } catch (error) {
+      formError(errorNode, error);
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
+
+/* ---------- 草稿详情 ---------- */
+
+function materialLabel(material) {
+  if (material.batch) {
+    const batch = app.state.batches.find(item => item.id === material.batch);
+    return `批次 ${material.batch}：${batch ? batch.hypothesis : "（已不存在）"}`;
+  }
+  if (material.belief) {
+    const belief = app.state.beliefs.find(item => item.id === material.belief);
+    return `信念 ${material.belief}：${belief ? belief.text : "（已不存在）"}`;
+  }
+  if (material.idea) {
+    const idea = app.state.ideas.find(item => item.id === material.idea);
+    return `想法 ${material.idea}：${idea ? idea.text : "（已不存在）"}`;
+  }
+  return "未知素材";
+}
+
+function materialKey(material) {
+  return material.batch ? `batch:${material.batch}`
+    : material.belief ? `belief:${material.belief}`
+    : material.idea ? `idea:${material.idea}` : "unknown";
+}
+
+function materialReferenceText(material) {
+  if (material.batch) {
+    const batch = app.state.batches.find(item => item.id === material.batch);
+    if (!batch) return `- 批次 ${material.batch}（数据已不存在）`;
+    const lines = [`**批次 ${batch.id}**：${batch.hypothesis}`];
+    if (batch.research_direction) lines.push(`（方向：${batch.research_direction}）`);
+    for (const run of batch.runs) {
+      const verdict = run.closed && run.verdict === "SURPRISE" ? "已复盘的超出预期" : (VERDICT_LABEL[run.verdict] || run.verdict);
+      const predicted = Object.entries(run.prediction?.metrics || {})
+        .map(([name, value]) => `${name} ${fmtPrediction(value)}`).join("，");
+      const actual = Object.entries(run.aggregates || {})
+        .map(([name, agg]) => `${name} ${fmt(agg.mean)}±${agg.sd === null ? "?" : fmt(agg.sd)}(n=${agg.n})`).join("，");
+      lines.push(`- \`${run.run}\`：预测 ${predicted || "—"}；实测 ${actual || "—"}（${verdict}）`);
+    }
+    return lines.join("\n");
+  }
+  if (material.belief) {
+    const belief = app.state.beliefs.find(item => item.id === material.belief);
+    if (!belief) return `- 信念 ${material.belief}（已不存在）`;
+    return `- 信念（${belief.status}）：${belief.text} [${belief.id}]`;
+  }
+  if (material.idea) {
+    const idea = app.state.ideas.find(item => item.id === material.idea);
+    if (!idea) return `- 想法 ${material.idea}（已不存在）`;
+    return `- 研究起点：${idea.text}${idea.motivation ? `（${idea.motivation}）` : ""} [${idea.id}]`;
+  }
+  return "";
+}
+
+function materialPickerHtml(section) {
+  const selected = new Set((section?.materials || []).map(materialKey));
+  const batchOptions = app.state.batches.map(batch => {
+    const key = `batch:${batch.id}`;
+    return `<label class="material-option">
+      <input type="checkbox" value="${esc(key)}" ${selected.has(key) ? "checked" : ""} />
+      <span><b>${esc(batch.id)}</b> ${esc(batch.hypothesis.slice(0, 40))}${batch.hypothesis.length > 40 ? "…" : ""}</span>
+    </label>`;
+  }).join("");
+  const beliefOptions = app.state.beliefs.map(belief => {
+    const key = `belief:${belief.id}`;
+    return `<label class="material-option">
+      <input type="checkbox" value="${esc(key)}" ${selected.has(key) ? "checked" : ""} />
+      <span><b>${esc(belief.id)}</b> ${esc(belief.text.slice(0, 40))}${belief.text.length > 40 ? "…" : ""}</span>
+    </label>`;
+  }).join("");
+  const ideaOptions = app.state.ideas.filter(idea => !idea.discarded).map(idea => {
+    const key = `idea:${idea.id}`;
+    return `<label class="material-option">
+      <input type="checkbox" value="${esc(key)}" ${selected.has(key) ? "checked" : ""} />
+      <span><b>${esc(idea.id)}</b> ${esc(idea.text.slice(0, 40))}${idea.text.length > 40 ? "…" : ""}</span>
+    </label>`;
+  }).join("");
+
+  const group = (label, options, emptyText) => options
+    ? `<div class="material-group"><h5>${label}</h5>${options}</div>`
+    : `<div class="material-group"><h5>${label}</h5><p class="muted" style="margin:4px 0">${emptyText}</p></div>`;
+
+  return `<div class="material-picker">
+    ${group("实验批次", batchOptions, "还没有批次")}
+    ${group("信念", beliefOptions, "还没有信念")}
+    ${group("想法", ideaOptions, "还没有想法")}
+  </div>`;
+}
+
+function sectionCardHtml(draft, name, label) {
+  const section = draft.sections.find(item => item.name === name);
+  const saved = section?.saved_ts ? `上次保存 ${dateLabel(section.saved_ts)}` : "还没写过";
+  return `<form class="card section-card" data-section="${esc(name)}" novalidate>
+    <div class="form-head spread">
+      <div><h3>${esc(label)}</h3><p>${esc(saved)}</p></div>
+      <button type="button" class="btn ghost sm insert-materials">↧ 插入选中素材</button>
+    </div>
+    <div class="field">
+      <textarea class="section-text" rows="${name === "abstract" ? 5 : 8}" placeholder="${esc(label)}……">${esc(section?.text || "")}</textarea>
+    </div>
+    <details class="material-details">
+      <summary>素材引用（${(section?.materials || []).length}）</summary>
+      ${materialPickerHtml(section)}
+      ${(section?.materials || []).length
+        ? `<div class="material-list">${section.materials.map(m =>
+            `<span class="chip">${esc(materialLabel(m))}</span>`).join("")}</div>` : ""}
+    </details>
+    <div class="form-actions"><button type="submit" class="btn primary sm">保存这一节</button></div>
+    <div class="form-error" hidden></div>
+  </form>`;
+}
+
+function renderDraft() {
+  const draftId = app.route.draft;
+  const draft = app.state.drafts.find(item => item.id === draftId);
+  const target = $("#draft-detail");
+
+  if (!draft) {
+    $("#page-title").textContent = "草稿不存在";
+    $("#page-sub").textContent = "";
+    target.innerHTML = emptyState({
+      icon: "?", title: "找不到这份草稿",
+      body: "它可能属于另一个研究目录。", cta: "回到论文列表", href: "#/paper",
+    });
+    return;
+  }
+
+  $("#page-title").textContent = draft.title;
+  $("#page-sub").textContent = draft.venue || "未定目标期刊或会议";
+
+  const statusOptions = DRAFT_STATUS_OPTIONS.map(([value, label]) =>
+    `<option value="${esc(value)}" ${draft.status === label ? "selected" : ""}>${esc(label)}</option>`).join("");
+  const savedSections = draft.sections.length;
+
+  target.innerHTML = `
+    <article class="card batch-head">
+      <a class="crumb" href="#/paper">← 论文</a>
+      <div class="batch-head-top">
+        <div>
+          <h2>${esc(draft.title)}</h2>
+          <p class="batch-direction">${esc(draft.venue || "未定目标期刊或会议")} · ${savedSections}/${app.state.sections.length} 节已动笔</p>
+        </div>
+        <div class="head-badges">
+          <select id="draft-status" class="status-select">${statusOptions}</select>
+          <button type="button" class="btn ghost sm" id="export-draft">导出 Markdown</button>
+        </div>
+      </div>
+      <div class="callout"><strong>素材自然沉淀</strong><span>引用批次与信念写下的每一段，都能追溯到证据来自哪次实验。</span></div>
+    </article>
+    <div id="section-list">
+      ${app.state.sections.map(({ name, label }) => sectionCardHtml(draft, name, label)).join("")}
+    </div>`;
+
+  bindDraftPage(draft);
+}
+
+function bindDraftPage(draft) {
+  $("#draft-status").onchange = async event => {
+    try {
+      await api("/api/drafts/status", {
+        method: "POST",
+        body: JSON.stringify({ draft: draft.id, status: event.target.value }),
+      });
+      toast("草稿状态已更新");
+      await refresh();
+    } catch (error) {
+      toast(error.message, true);
+      await refresh();
+    }
+  };
+
+  $("#export-draft").onclick = async () => {
+    try {
+      const result = await api("/api/drafts/export", {
+        method: "POST",
+        body: JSON.stringify({ draft: draft.id }),
+      });
+      const blob = new Blob([result.markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${draft.id}-${draft.title.slice(0, 24)}.md`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast(error.message, true);
+    }
+  };
+
+  $$("#draft-detail .section-card").forEach(form => {
+    $(".insert-materials", form).onclick = () => {
+      const textarea = $(".section-text", form);
+      const checked = $$(".material-option input:checked", form);
+      if (!checked.length) {
+        toast("先在「素材引用」里勾选要引用的批次或信念");
+        return;
+      }
+      const references = checked.map(input => {
+        const [kind, id] = input.value.split(":");
+        return materialReferenceText({ [kind]: id });
+      }).join("\n\n");
+      textarea.value = textarea.value.trimEnd()
+        ? `${textarea.value.trimEnd()}\n\n${references}\n`
+        : `${references}\n`;
+      textarea.focus();
+      textarea.selectionStart = textarea.value.length;
+    };
+
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const errorNode = $(".form-error", form);
+      errorNode.hidden = true;
+      const button = $("button[type=submit]", form);
+      button.disabled = true;
+      const materials = $$(".material-option input:checked", form).map(input => {
+        const [kind, id] = input.value.split(":");
+        return { [kind]: id };
+      });
+      try {
+        await api("/api/drafts/section", {
+          method: "POST",
+          body: JSON.stringify({
+            draft: draft.id,
+            section: form.dataset.section,
+            text: $(".section-text", form).value,
+            materials,
+          }),
+        });
+        toast("这一节已保存");
+        await refresh();
+      } catch (error) {
+        formError(errorNode, error);
+      } finally {
+        button.disabled = false;
+      }
+    };
+  });
+}
+
 /* ---------- 启动 ---------- */
 
 function setup() {
@@ -888,6 +1452,30 @@ function setup() {
   };
   $("#preview-runs").onclick = previewRuns;
   $("#plan-form").onsubmit = submitPlan;
+  $("#idea-form").onsubmit = async event => {
+    event.preventDefault();
+    const errorNode = $("#idea-error");
+    errorNode.hidden = true;
+    const button = $("button[type=submit]", $("#idea-form"));
+    button.disabled = true;
+    try {
+      const result = await api("/api/ideas", {
+        method: "POST",
+        body: JSON.stringify({
+          text: $("#idea-text").value,
+          motivation: $("#idea-motivation").value,
+        }),
+      });
+      toast(`想法 ${result.idea} 已入账本`);
+      $("#idea-text").value = "";
+      $("#idea-motivation").value = "";
+      await refresh();
+    } catch (error) {
+      formError(errorNode, error);
+    } finally {
+      button.disabled = false;
+    }
+  };
   resetPlan();
   window.addEventListener("hashchange", render);
   app.route = parseHash();

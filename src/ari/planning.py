@@ -40,6 +40,7 @@ class Design:
     result_path: str | None = None
     expected_ranking: dict | None = None
     research_direction: str = ""
+    idea: str = ""
 
 
 def next_batch_id(batches: dict) -> str:
@@ -291,6 +292,7 @@ def build_events(
         payload={
             "hypothesis": design.hypothesis,
             "research_direction": design.research_direction,
+            "idea": (design.idea or "").strip(),
             "dimensions": design.dimensions,
             "metric_specs": {
                 name: {
