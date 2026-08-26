@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>Ariadne · 科研工作台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -16,6 +16,7 @@
         </a>
 
         <a class="btn primary sidebar-new" href="#/new">＋ 新实验</a>
+        <button type="button" class="kbd-hint" id="open-palette">搜索或跳转… <kbd>Ctrl K</kbd></button>
 
         <nav class="nav" aria-label="主导航">
           <a class="nav-link" href="#/" data-nav="dashboard"><span class="nav-ico" aria-hidden="true">◍</span>工作台</a>
@@ -26,6 +27,9 @@
         </nav>
 
         <div class="sidebar-foot">
+          <button type="button" class="theme-toggle" id="theme-toggle">
+            <span><span class="ico-moon" aria-hidden="true">◑ 深色模式</span><span class="ico-sun" aria-hidden="true">◐ 浅色模式</span></span>
+          </button>
           <button id="switch-project" class="link-btn" hidden>⇄ 切换研究目录</button>
           <p class="local-note"><span class="dot" aria-hidden="true"></span>本地运行 · 数据留在你的电脑</p>
           <small id="project-path" class="path"></small>
@@ -142,6 +146,13 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="palette-overlay" class="palette-overlay" hidden>
+      <div class="palette" role="dialog" aria-label="搜索与跳转">
+        <input id="palette-input" class="palette-input" placeholder="搜索想法、批次、信念、草稿，或跳转页面…" autocomplete="off" />
+        <div id="palette-list" class="palette-list" role="listbox"></div>
+        <div class="palette-foot"><span>↑↓ 选择</span><span>↵ 跳转</span><span>esc 关闭</span></div>
+      </div>
+    </div>
     <script src="/app.js" defer></script>
   </body>
 </html>

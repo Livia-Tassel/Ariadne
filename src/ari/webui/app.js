@@ -1585,6 +1585,143 @@ function restoreDirtyDraft(snapshot) {
   }
 }
 
+/* ---------- 主题 ---------- */
+
+const THEME_KEY = "ariadne-theme";
+
+function initTheme() {
+  let theme = null;
+  try { theme = localStorage.getItem(THEME_KEY); } catch { theme = null; }
+  if (theme !== "dark" && theme !== "light") {
+    theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  document.documentElement.dataset.theme = theme;
+  $("#theme-toggle").onclick = () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* 隐私模式下不记忆，仅本次生效 */ }
+  };
+}
+
+/* ---------- 命令面板 ---------- */
+
+const PALETTE_PAGES = [
+  { label: "工作台", sub: "总览与下一步", href: "#/" },
+  { label: "想法", sub: "从念头到立项", href: "#/ideas" },
+  { label: "新实验", sub: "设计批次并锁定预测", href: "#/new" },
+  { label: "实验批次", sub: "全部批次", href: "#/experiments" },
+  { label: "信念", sub: "信念账本", href: "#/beliefs" },
+  { label: "论文", sub: "草稿列表", href: "#/paper" },
+];
+
+function paletteEntries() {
+  const s = app.state;
+  if (!s) return [];
+  const entries = PALETTE_PAGES.map(page =>
+    ({ type: "页面", text: page.label, sub: page.sub, href: page.href }));
+  for (const idea of s.ideas) {
+    entries.push({ type: "想法", text: idea.text, sub: `${idea.id} · ${idea.status}`, href: "#/ideas" });
+  }
+  for (const batch of s.batches) {
+    entries.push({
+      type: "批次", text: batch.hypothesis || batch.id,
+      sub: `${batch.id} · ${batch.closed ? "已收口" : "进行中"} · ${batch.research_direction || ""}`,
+      href: `#/batch/${batch.id}`,
+    });
+  }
+  for (const belief of s.beliefs) {
+    entries.push({ type: "信念", text: belief.text, sub: `${belief.id} · ${belief.status}`, href: "#/beliefs" });
+  }
+  for (const draft of s.drafts) {
+    entries.push({ type: "论文", text: draft.title, sub: `${draft.id} · ${draft.status}`, href: `#/paper/${draft.id}` });
+  }
+  return entries;
+}
+
+const palette = { open: false, entries: [], selected: 0 };
+
+function openPalette() {
+  if (palette.open) return;
+  palette.open = true;
+  $("#palette-overlay").hidden = false;
+  const input = $("#palette-input");
+  input.value = "";
+  renderPalette("");
+  input.focus();
+}
+
+function closePalette() {
+  palette.open = false;
+  $("#palette-overlay").hidden = true;
+}
+
+function renderPalette(query) {
+  const q = query.trim().toLowerCase();
+  const all = paletteEntries();
+  palette.entries = q
+    ? all.filter(entry =>
+        `${entry.text} ${entry.sub}`.toLowerCase().includes(q))
+    : all.slice(0, 9);
+  palette.selected = 0;
+
+  const list = $("#palette-list");
+  if (!palette.entries.length) {
+    list.innerHTML = `<div class="palette-empty">没有匹配「${esc(query)}」的内容</div>`;
+    return;
+  }
+  list.innerHTML = palette.entries.map((entry, index) => `
+    <button type="button" class="palette-item ${index === 0 ? "selected" : ""}" data-index="${index}" role="option">
+      <span class="palette-type">${esc(entry.type)}</span>
+      <span class="palette-body">
+        <span class="palette-text">${esc(entry.text)}</span>
+        <span class="palette-sub">${esc(entry.sub)}</span>
+      </span>
+    </button>`).join("");
+  $$("#palette-list .palette-item").forEach(item => {
+    item.onclick = () => goPaletteEntry(Number(item.dataset.index));
+  });
+}
+
+function movePaletteSelection(delta) {
+  const count = palette.entries.length;
+  if (!count) return;
+  palette.selected = (palette.selected + delta + count) % count;
+  $$("#palette-list .palette-item").forEach((item, index) =>
+    item.classList.toggle("selected", index === palette.selected));
+  const active = $(`#palette-list .palette-item[data-index="${palette.selected}"]`);
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function goPaletteEntry(index) {
+  const entry = palette.entries[index];
+  if (!entry) return;
+  closePalette();
+  go(entry.href);
+}
+
+function initPalette() {
+  $("#open-palette").onclick = openPalette;
+  $("#palette-overlay").addEventListener("mousedown", event => {
+    if (event.target === $("#palette-overlay")) closePalette();
+  });
+  $("#palette-input").addEventListener("input", event => renderPalette(event.target.value));
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      palette.open ? closePalette() : openPalette();
+      return;
+    }
+    if (!palette.open) return;
+    if (event.key === "Escape") { event.preventDefault(); closePalette(); }
+    else if (event.key === "ArrowDown") { event.preventDefault(); movePaletteSelection(1); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); movePaletteSelection(-1); }
+    else if (event.key === "Enter") {
+      event.preventDefault();
+      goPaletteEntry(palette.selected);
+    }
+  });
+}
+
 /* ---------- 启动 ---------- */
 
 function setup() {
@@ -1627,6 +1764,8 @@ function setup() {
     }
   };
   resetPlan();
+  initTheme();
+  initPalette();
   window.addEventListener("hashchange", onHashChange);
   window.addEventListener("beforeunload", event => {
     if (app.dirtySections.size) {
