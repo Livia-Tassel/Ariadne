@@ -11,6 +11,7 @@ const app = {
   route: { view: "dashboard" },
   pendingScroll: null, // 仅 hash 跳转时置位，刷新数据后的重渲染不滚动
   plan: { runs: [], metrics: [], idea: "" },
+  dirtySections: new Set(), // 草稿页有未保存改动的节名
 };
 
 /* ---------- 基础工具 ---------- */
@@ -193,11 +194,13 @@ function updateNavCounts() {
 }
 
 async function refresh() {
+  const dirtySnapshot = captureDirtyDraft();
   try {
     app.state = await api("/api/state");
     $("#project-path").textContent = app.state.project.path;
     updateNavCounts();
     renderCurrentView();
+    restoreDirtyDraft(dirtySnapshot);
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -559,6 +562,8 @@ function renderBatch() {
       ${batch.warnings?.length ? `<div class="notice">${batch.warnings.map(esc).join("<br>")}</div>` : ""}
     </article>
 
+    ${batchChartsHtml(batch)}
+
     <div class="table-wrap">
       <table class="table">
         <thead><tr><th style="width:26%">Run</th><th>预测</th><th>实测</th><th>判定</th><th></th></tr></thead>
@@ -575,6 +580,92 @@ function renderBatch() {
     if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
     app.pendingScroll = null;
   }
+}
+
+/* ---------- 预测 vs 实测图 ---------- */
+
+function metricVerdictOf(run, name) {
+  return run.judgements?.[name]?.verdict || run.verdict || "NO_RESULT";
+}
+
+function chartScale(runs, name) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  const push = value => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return;
+    lo = Math.min(lo, number);
+    hi = Math.max(hi, number);
+  };
+  for (const run of runs) {
+    const pred = run.prediction?.metrics?.[name];
+    if (Array.isArray(pred)) pred.forEach(push);
+    else push(pred);
+    const agg = run.aggregates?.[name];
+    if (agg) push(agg.mean);
+    for (const value of Object.values(run.samples?.[name] || {})) push(value);
+  }
+  if (lo === Infinity) return null;
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const pad = (hi - lo) * 0.08;
+  return { lo: lo - pad, hi: hi + pad };
+}
+
+function metricChartHtml(batch, name) {
+  const runs = batch.runs;
+  const scale = chartScale(runs, name);
+  if (!scale) return "";
+  const span = scale.hi - scale.lo;
+  const pct = value => Math.min(Math.max(((Number(value) - scale.lo) / span) * 100, 0), 100);
+
+  const grid = [25, 50, 75].map(x => `<i class="grid-line" style="left:${x}%"></i>`).join("");
+  const rows = runs.map(run => {
+    const pred = run.prediction?.metrics?.[name];
+    const agg = run.aggregates?.[name];
+    const verdict = metricVerdictOf(run, name);
+    const parts = [grid];
+    if (pred !== undefined && pred !== null) {
+      const [pLo, pHi] = Array.isArray(pred) ? pred : [pred, pred];
+      const left = pct(pLo);
+      const width = Math.max(pct(pHi) - left, 0.8);
+      parts.push(`<i class="pred-band" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></i>`);
+      if (width > 3) parts.push(`<i class="pred-mid" style="left:${(left + width / 2).toFixed(2)}%"></i>`);
+    }
+    if (agg) {
+      if (agg.sd && agg.sd > 0) {
+        const sdLo = pct(agg.mean - agg.sd);
+        const sdHi = pct(agg.mean + agg.sd);
+        parts.push(`<i class="actual-spread v-${verdict}" style="left:${sdLo.toFixed(2)}%;width:${Math.max(sdHi - sdLo, 0.6).toFixed(2)}%"></i>`);
+      }
+      for (const value of Object.values(run.samples?.[name] || {})) {
+        parts.push(`<i class="seed-dot" style="left:${pct(value).toFixed(2)}%"></i>`);
+      }
+      parts.push(`<i class="actual-dot v-${verdict}" style="left:${pct(agg.mean).toFixed(2)}%" title="${esc(fmt(agg.mean))}"></i>`);
+    }
+    return `<div class="chart-row">
+      <span class="chart-label" title="${esc(run.run)}">${esc(run.run)}</span>
+      <div class="chart-track" role="img" aria-label="${esc(run.run)} 的 ${esc(name)} 预测与实测对比">${parts.join("")}</div>
+    </div>`;
+  }).join("");
+
+  const spec = batch.metric_specs?.[name] || {};
+  const specText = `${DIRECTION_LABEL[spec.direction] || ""}${spec.compare ? ` · ${COMPARE_LABEL[spec.compare] || spec.compare} · 容差 ${fmt(spec.tolerance)}` : ""}`;
+
+  return `<article class="card chart-card">
+    <div class="chart-head">
+      <h3>${esc(name)}</h3>
+      <span class="chart-spec muted">${esc(specText)}</span>
+      <span class="chart-legend"><i class="pred-band"></i>预测区间<i class="actual-dot"></i>实测均值</span>
+    </div>
+    <div class="chart-rows">${rows}</div>
+    <div class="chart-axis"><span>${fmt(scale.lo)}</span><span>${fmt((scale.lo + scale.hi) / 2)}</span><span>${fmt(scale.hi)}</span></div>
+  </article>`;
+}
+
+function batchChartsHtml(batch) {
+  const names = Object.keys(batch.runs[0]?.prediction?.metrics || {});
+  if (!names.length) return "";
+  return names.map(name => metricChartHtml(batch, name)).join("");
 }
 
 function rankingNoteHtml(batch) {
@@ -1288,7 +1379,7 @@ function sectionCardHtml(draft, name, label) {
   const saved = section?.saved_ts ? `上次保存 ${dateLabel(section.saved_ts)}` : "还没写过";
   return `<form class="card section-card" data-section="${esc(name)}" novalidate>
     <div class="form-head spread">
-      <div><h3>${esc(label)}</h3><p>${esc(saved)}</p></div>
+      <div><h3>${esc(label)} <span class="dirty-flag" hidden>未保存</span></h3><p>${esc(saved)}</p></div>
       <button type="button" class="btn ghost sm insert-materials">↧ 插入选中素材</button>
     </div>
     <div class="field">
@@ -1348,6 +1439,7 @@ function renderDraft() {
     </div>`;
 
   bindDraftPage(draft);
+  restoreStashedDraft(draft.id);
 }
 
 function bindDraftPage(draft) {
@@ -1386,6 +1478,8 @@ function bindDraftPage(draft) {
   };
 
   $$("#draft-detail .section-card").forEach(form => {
+    $(".section-text", form).addEventListener("input", () => markSectionDirty(form, true));
+
     $(".insert-materials", form).onclick = () => {
       const textarea = $(".section-text", form);
       const checked = $$(".material-option input:checked", form);
@@ -1400,6 +1494,7 @@ function bindDraftPage(draft) {
       textarea.value = textarea.value.trimEnd()
         ? `${textarea.value.trimEnd()}\n\n${references}\n`
         : `${references}\n`;
+      markSectionDirty(form, true);
       textarea.focus();
       textarea.selectionStart = textarea.value.length;
     };
@@ -1424,6 +1519,7 @@ function bindDraftPage(draft) {
             materials,
           }),
         });
+        markSectionDirty(form, false);
         toast("这一节已保存");
         await refresh();
       } catch (error) {
@@ -1433,6 +1529,60 @@ function bindDraftPage(draft) {
       }
     };
   });
+}
+
+function markSectionDirty(form, dirty) {
+  form.classList.toggle("dirty", dirty);
+  const flag = $(".dirty-flag", form);
+  if (flag) flag.hidden = !dirty;
+  if (dirty) app.dirtySections.add(form.dataset.section);
+  else app.dirtySections.delete(form.dataset.section);
+  const draftId = app.route.draft;
+  if (!draftId) return;
+  if (dirty) {
+    try {
+      localStorage.setItem(`ariadne-stash:${draftId}:${form.dataset.section}`, $(".section-text", form).value);
+    } catch { /* 隐私模式等场景下暂存不可用，静默降级 */ }
+  } else {
+    try {
+      localStorage.removeItem(`ariadne-stash:${draftId}:${form.dataset.section}`);
+    } catch { /* 同上 */ }
+  }
+}
+
+function restoreStashedDraft(draftId) {
+  for (const form of $$("#draft-detail .section-card")) {
+    let text = null;
+    try {
+      text = localStorage.getItem(`ariadne-stash:${draftId}:${form.dataset.section}`);
+    } catch { text = null; }
+    if (text === null) continue;
+    $(".section-text", form).value = text;
+    markSectionDirty(form, true);
+  }
+}
+
+function captureDirtyDraft() {
+  if (!app.dirtySections.size) return null;
+  const forms = $$("#draft-detail .section-card");
+  if (!forms.length) return null;
+  const sections = {};
+  for (const form of forms) {
+    if (app.dirtySections.has(form.dataset.section)) {
+      sections[form.dataset.section] = $(".section-text", form).value;
+    }
+  }
+  return { draft: app.route.draft, sections };
+}
+
+function restoreDirtyDraft(snapshot) {
+  if (!snapshot || app.route.view !== "draft" || app.route.draft !== snapshot.draft) return;
+  for (const form of $$("#draft-detail .section-card")) {
+    const text = snapshot.sections[form.dataset.section];
+    if (text === undefined) continue;
+    $(".section-text", form).value = text;
+    markSectionDirty(form, true);
+  }
 }
 
 /* ---------- 启动 ---------- */
@@ -1477,9 +1627,43 @@ function setup() {
     }
   };
   resetPlan();
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", onHashChange);
+  window.addEventListener("beforeunload", event => {
+    if (app.dirtySections.size) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
+  document.addEventListener("keydown", event => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+    const view = $("#view-draft.active");
+    if (!view) return;
+    const form = (event.target instanceof Element && event.target.closest(".section-card"))
+      || $(".section-card.dirty", view)
+      || $(".section-card", view);
+    if (!form) return;
+    event.preventDefault();
+    form.requestSubmit();
+  });
   app.route = parseHash();
+  app.lastHash = location.hash;
   refresh();
+}
+
+let restoringHash = false;
+
+function onHashChange() {
+  if (restoringHash) {
+    restoringHash = false;
+    return;
+  }
+  if (app.dirtySections.size && !window.confirm("有未保存的章节，离开会丢掉刚写的内容。确定离开吗？")) {
+    restoringHash = true;
+    location.hash = app.lastHash || "#/paper";
+    return;
+  }
+  app.lastHash = location.hash;
+  render();
 }
 
 document.addEventListener("DOMContentLoaded", setup);
