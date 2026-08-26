@@ -1,6 +1,6 @@
 # ari — 实验预测、记录与复盘闭环
 
-`ari` 是一个陪伴科研人员的本地 CLI。它只做一件事：把**实验开跑前先写下对结果的预测**这件事变成低摩擦的流程，再让结果与预测的差异自动浮上来，逼出真正的反思。
+`ari` 是一个陪伴科研人员的本地实验工作台。它把**实验开跑前先写下对结果的预测**这件事变成低摩擦的流程，再让结果与预测的差异自动浮上来，逼出真正的反思。v0.3 提供可独立运行的桌面应用，CLI 继续作为自动化与高级入口。
 
 核心闭环：
 
@@ -13,7 +13,7 @@ plan（填预测并锁定） → result（录实测） → 自动判定 → revi
 - **负结果与正结果同等重要。** 最没有价值的是没有任何起伏的实验批次。
 - **写论文所需的一切材料，在过程中自然沉淀，而不是最后回头补。**
 
-完整设计见 [`specs/2026-08-23-experiment-loop-design.md`](specs/2026-08-23-experiment-loop-design.md)。
+当前桌面设计见 [`specs/2026-08-25-desktop-v0.3-design.md`](specs/2026-08-25-desktop-v0.3-design.md)，GUI 设计见 [`specs/2026-08-25-gui-v0.2-design.md`](specs/2026-08-25-gui-v0.2-design.md)，领域规则见 [`specs/2026-08-23-experiment-loop-design.md`](specs/2026-08-23-experiment-loop-design.md)。
 
 ## 安装
 
@@ -42,7 +42,28 @@ ari --help
 
 > 如果你的环境没有 hidden `.pth` 的问题，`uv run ari` 同样可用；`bin/ari` 只是更稳的入口。
 
-## 用法
+## 桌面应用：推荐入口
+
+开发仓库已经可以构建 macOS 应用：
+
+```bash
+uv sync --extra desktop --group package
+./scripts/build_macos_app.sh
+```
+
+构建完成后，直接在 Finder 双击 `dist/Ariadne.app`。应用启动时会显示系统目录选择器：选择空目录即可创建项目，选择已有 Ariadne 目录则直接打开。之后不需要终端。
+
+当前 `.app` 是本地预览构建，尚未使用 Apple Developer ID 签名与公证，不应直接作为公开下载版本发布。
+
+## 浏览器 GUI：开发入口
+
+```bash
+ari gui -p ~/exp/lr-sweep
+```
+
+浏览器会打开本地工作台。项目不存在时会自动初始化；研究方向、变量维度、指标、预测、实测与复盘都可以直接在页面里填写，不需要编辑 YAML 或 JSON。服务默认只监听 `127.0.0.1`，页面资源随程序打包，断网也能使用。
+
+## CLI：自动化与高级入口
 
 ```bash
 ari init ~/exp/lr-sweep        # 建立项目骨架
@@ -64,6 +85,7 @@ ari board  -p ~/exp/lr-sweep   # 渲染看板，重新生成 board.md 与 belief
 | `ari result` | 录入实测：按 `result_path` 模板自动发现结果文件，或 `--manual` 手工填写。解析结果先展示「抽到了这些，对吗？」确认后才落盘 |
 | `ari review` | 逐个复盘 SURPRISE 的 run，追问原因，写 `reflection`；顺手记下信念的增减；全部处理完后可写一条 batch 级收口 |
 | `ari board` | 渲染看板，并重新生成 `board.md` 与 `beliefs.md`。未复盘的 SURPRISE 置顶 |
+| `ari gui` | 启动本地可视化工作台，项目不存在时自动初始化 |
 
 ### 信念账本
 
@@ -80,7 +102,7 @@ ari board  -p ~/exp/lr-sweep   # 渲染看板，重新生成 board.md 与 belief
 
 ### AI 那一层
 
-**先说保证：整层都是可选的。** 不配 `config.toml`、不设 API key、或者干脆没网，五条命令的行为完全不变，只是少了 AI 那一段——不报错，不阻断，不需要加任何 flag。
+**先说保证：整层都是可选的。** 不配 `config.toml`、不设 API key、或者干脆没网，GUI 与全部非 AI 命令的行为都不变，只是少了 AI 那一段——不报错，不阻断，不需要加任何 flag。
 
 配置在 `ari init` 生成的 `config.toml` 里，只写平台地址与**环境变量名**，密钥的值从环境读：
 

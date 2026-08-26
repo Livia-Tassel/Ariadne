@@ -137,6 +137,24 @@ def test_confirmed_run_closes_via_batch_reflection():
     assert batches["b1"].runs["model=large"].closed is True
 
 
+def test_batch_reflection_does_not_close_a_run_with_no_result():
+    batches, _ = project(
+        [
+            make_batch_opened(),
+            make_prediction("model=large", {"top1_acc": 0.830}),
+            Event(
+                ts="2026-08-23T13:00:00+08:00",
+                type="reflection",
+                batch="b1",
+                payload={"scope": "batch", "text": "过早收口"},
+            ),
+        ]
+    )
+
+    assert batches["b1"].runs["model=large"].verdict is Verdict.NO_RESULT
+    assert batches["b1"].closed is False
+
+
 def test_all_confirmed_batch_raises_the_low_information_signal():
     batches, _ = project(
         [

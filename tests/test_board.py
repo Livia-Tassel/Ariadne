@@ -66,3 +66,19 @@ def test_noisy_run_explains_why_no_conclusion(make_events):
 
     assert "NOISY" in output
     assert "seed" in output
+
+
+def test_research_direction_is_shown_when_present(make_events):
+    events = make_events(prediction=0.830, actual=0.831)
+    events[0] = type(events[0])(
+        ts=events[0].ts,
+        type=events[0].type,
+        batch=events[0].batch,
+        payload={**events[0].payload, "research_direction": "小数据集上的模型正则化"},
+    )
+    batches, warnings = project(events)
+
+    output = render_markdown(batches, warnings, parse_errors=[])
+
+    assert "研究方向" in output
+    assert "小数据集上的模型正则化" in output

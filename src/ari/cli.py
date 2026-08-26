@@ -38,7 +38,7 @@ from .probing import PROBE_SCHEMA
 from .probing import SYSTEM as PROBE_SYSTEM
 from .probing import build_prompt as build_probe_prompt
 from .probing import check_probe
-from .project import project as project_events
+from .project import closure_blockers, project as project_events
 from .recall import similar
 from .reviewing import (
     build_batch_draft,
@@ -48,6 +48,7 @@ from .reviewing import (
     parse_reflection,
     pending,
 )
+from .workspace import initialize_project
 
 app = typer.Typer(add_completion=False, help="实验预测、记录与复盘闭环")
 
@@ -60,29 +61,6 @@ def main() -> None:
     否则单命令时会被折叠成裸命令。
     """
 
-CONFIG_TEMPLATE = """\
-# 本文件会进 git —— 只放平台地址与环境变量名，绝不放密钥。
-#
-# 整份配置都是可选的。删掉这个文件，或者不设下面这些环境变量，
-# ari 的每一条命令都照常工作，只是没有 AI 那一段。
-
-[providers.openai]
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-
-[providers.anthropic]
-base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_API_KEY"
-
-[roles]
-# 复盘追问与 plan 阶段的定性判断。
-# Anthropic 侧使用 adaptive thinking，需要 Claude 4.6 及以上的模型。
-reason = "anthropic:claude-opus-5"
-# 日志抽取，v1 未启用（见 spec §5.3）
-# extract = "openai:gpt-5.5"
-"""
-
-
 @app.command()
 def init(path: str = typer.Argument(..., help="项目目录")) -> None:
     """建立项目目录骨架。"""
@@ -92,9 +70,7 @@ def init(path: str = typer.Argument(..., help="项目目录")) -> None:
         typer.echo(f"{runs} 已存在，拒绝覆盖。", err=True)
         raise typer.Exit(code=1)
 
-    (project / "logs").mkdir(parents=True, exist_ok=True)
-    runs.touch()
-    (project / "config.toml").write_text(CONFIG_TEMPLATE, encoding="utf-8")
+    initialize_project(project)
 
     typer.echo(f"已初始化 {project}")
     typer.echo("下一步：ari plan 开启第一个批次。")
@@ -473,7 +449,13 @@ def review(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    # 复盘事件已经在上面的循环中追加，重新投影后再判断能否收口。
+    batches, _ = project_events(events)
     batch = list(batches.values())[-1]
+    blockers = closure_blockers(batch)
+    if blockers:
+        typer.echo(f"批次 {batch.id} 还不能收口：{'；'.join(blockers)}。")
+        return
     if not typer.confirm(f"给批次 {batch.id} 写一句整体收口？", default=False):
         return
 
@@ -534,3 +516,16 @@ def _probe_or_none(root: Path, batches: dict, run, runs_path: Path) -> dict | No
         ),
     )
     return hint
+
+
+@app.command()
+def gui(
+    project_dir: str = typer.Option(".", "--project", "-p", help="项目目录"),
+    host: str = typer.Option("127.0.0.1", help="监听地址；默认仅本机可访问"),
+    port: int = typer.Option(8765, min=0, max=65535, help="监听端口，0 表示自动选择"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="启动后打开浏览器"),
+) -> None:
+    """启动本地可视化工作台。项目不存在时会自动初始化。"""
+    from .web import serve
+
+    serve(Path(project_dir), host=host, port=port, open_browser=open_browser)

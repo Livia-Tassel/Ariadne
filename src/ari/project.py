@@ -57,6 +57,7 @@ class RunState:
 @dataclass
 class BatchState:
     id: str
+    research_direction: str = ""
     hypothesis: str = ""
     dimensions: dict = field(default_factory=dict)
     metric_specs: dict = field(default_factory=dict)
@@ -96,6 +97,7 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
         if event.type == "batch_opened":
             batches[event.batch] = BatchState(
                 id=event.batch,
+                research_direction=event.payload.get("research_direction", ""),
                 hypothesis=event.payload.get("hypothesis", ""),
                 dimensions=event.payload.get("dimensions", {}),
                 metric_specs=event.payload.get("metric_specs", {}),
@@ -197,14 +199,11 @@ def _finalize(batch: BatchState) -> None:
 
     _finalize_ranking(batch)
 
-    surprises_open = [
-        r for r in batch.runs.values() if r.verdict is Verdict.SURPRISE and not r.closed
-    ]
     if batch.batch_reflection:
         for run in batch.runs.values():
             if run.verdict is Verdict.CONFIRMED:
                 run.closed = True
-    batch.closed = batch.batch_reflection and not surprises_open
+    batch.closed = batch.batch_reflection and not closure_blockers(batch)
 
     all_confirmed = bool(batch.runs) and all(
         r.verdict is Verdict.CONFIRMED for r in batch.runs.values()
@@ -214,6 +213,27 @@ def _finalize(batch: BatchState) -> None:
         Verdict.NO_RESULT,
     )
     batch.info_signal = LOW_INFORMATION_SIGNAL if all_confirmed and ranking_ok else None
+
+
+def closure_blockers(batch: BatchState) -> list[str]:
+    """返回阻止批次收口的原因。
+
+    原设计只检查未复盘 SURPRISE，导致完全没有结果或明显 NOISY 的批次也能
+    被标成「已收口」。GUI 把这个漏洞暴露得很明显，因此领域层统一修正。
+    """
+    groups = {
+        Verdict.NO_RESULT: "还有 run 尚无结果",
+        Verdict.UNVERIFIED: "还有结果待确认",
+        Verdict.NOISY: "还有 run 的噪声大于判定分辨率",
+    }
+    blockers = [
+        message
+        for verdict, message in groups.items()
+        if any(run.verdict is verdict for run in batch.runs.values())
+    ]
+    if any(run.verdict is Verdict.SURPRISE and not run.closed for run in batch.runs.values()):
+        blockers.append("还有 SURPRISE 未复盘")
+    return blockers
 
 
 def _finalize_ranking(batch: BatchState) -> None:

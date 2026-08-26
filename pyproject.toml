@@ -1,7 +1,7 @@
 [project]
 name = "ariadne-ra"
-version = "0.1.0"
-description = "实验预测、记录与复盘闭环"
+version = "0.3.0"
+description = "可独立运行的实验预测、记录与复盘桌面工作台"
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",
@@ -14,6 +14,12 @@ dependencies = [
 [project.scripts]
 ari = "ari.cli:app"
 
+[project.gui-scripts]
+ariadne = "ari.desktop:main"
+
+[project.optional-dependencies]
+desktop = ["pywebview>=6.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -23,6 +29,11 @@ packages = ["src/ari"]
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
+package = [
+    "py2app>=0.28.10; sys_platform == 'darwin'",
+    # py2app 0.28.10 仍向 distutils.spawn 传 verbose；setuptools 84 删除了该参数。
+    "setuptools>=70,<84; sys_platform == 'darwin'",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

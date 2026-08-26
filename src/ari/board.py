@@ -84,6 +84,8 @@ def render_markdown(batches: dict[str, BatchState], warnings, parse_errors) -> s
 def _render_batch(batch: BatchState) -> list[str]:
     status = "已收口" if batch.closed else "进行中"
     lines = [f"## 批次 {batch.id}（{status}）", ""]
+    if batch.research_direction:
+        lines += [f"**研究方向：** {batch.research_direction}", ""]
     if batch.hypothesis:
         # 粗体标记后必须留空格，否则紧邻 CJK 时 markdown 不识别
         lines += [f"**假设：** {batch.hypothesis}", ""]

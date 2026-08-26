@@ -39,6 +39,7 @@ class Design:
     metric_specs: dict[str, MetricSpec] = field(default_factory=dict)
     result_path: str | None = None
     expected_ranking: dict | None = None
+    research_direction: str = ""
 
 
 def next_batch_id(batches: dict) -> str:
@@ -289,6 +290,7 @@ def build_events(
         batch=batch_id,
         payload={
             "hypothesis": design.hypothesis,
+            "research_direction": design.research_direction,
             "dimensions": design.dimensions,
             "metric_specs": {
                 name: {
