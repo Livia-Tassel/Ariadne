@@ -798,12 +798,34 @@ _POST_ROUTES = {
     "/api/drafts/export": "export_draft",
 }
 
-_STATIC = {
-    "/": "index.html",
-    "/index.html": "index.html",
-    "/app.js": "app.js",
-    "/styles.css": "styles.css",
-}
+_STATIC_SUFFIXES = frozenset({".html", ".css", ".js", ".svg"})
+_STATIC_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _static_target(url_path: str) -> str | None:
+    """把 URL 路径映射到 `webui/` 下的相对文件名；不合法返回 None。
+
+    前端拆成了 `lib/` `views/` `parts/` 多个 ES 模块，写死的字典不再够用。
+    但目录服务必须把字典写法「构造上安全」这个性质显式补回来。
+
+    只做词法校验，不碰文件系统：`asset_file()` 在 wheel 安装时返回的是
+    importlib.resources 的 Traversable 而不是 Path，能不能 `resolve()`
+    取决于安装形态。词法白名单在源码、wheel 与 .app 三种形态下行为一致，
+    也不会因为符号链接而出现差异。
+
+    URL 不做百分号解码：`/..%2fweb.py` 因此以字面量形式撞上字符集白名单。
+    """
+    if url_path in ("/", "/index.html"):
+        return "index.html"
+    if not url_path.startswith("/"):
+        return None
+    segments = url_path[1:].split("/")
+    for segment in segments:
+        if segment in (".", "..") or not _STATIC_SEGMENT.match(segment):
+            return None
+    if not segments or "." + segments[-1].rsplit(".", 1)[-1].lower() not in _STATIC_SUFFIXES:
+        return None
+    return "/".join(segments)
 
 
 def _handler_for(service: GuiService, allowed_hosts=()):
@@ -820,7 +842,7 @@ def _handler_for(service: GuiService, allowed_hosts=()):
             if path == "/api/state":
                 self._json(HTTPStatus.OK, service.state())
                 return
-            asset = _STATIC.get(path)
+            asset = _static_target(path)
             if asset is None:
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "页面不存在"})
                 return

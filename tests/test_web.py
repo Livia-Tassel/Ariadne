@@ -325,3 +325,38 @@ def test_revising_meta_of_an_unknown_batch_is_rejected(tmp_path):
 
     with pytest.raises(GuiInputError):
         service.revise_batch_meta({"batch": "nope", "result_path": "logs/x.json"})
+
+
+@pytest.mark.parametrize(
+    "url_path, expected",
+    [
+        ("/", "index.html"),
+        ("/index.html", "index.html"),
+        ("/app.js", "app.js"),
+        ("/styles.css", "styles.css"),
+        ("/lib/dom.js", "lib/dom.js"),
+        ("/views/today.js", "views/today.js"),
+    ],
+)
+def test_static_paths_inside_webui_are_served(url_path, expected):
+    assert web._static_target(url_path) == expected
+
+
+@pytest.mark.parametrize(
+    "url_path",
+    [
+        "/../web.py",                 # 上跳一级
+        "/lib/../../web.py",          # 中途上跳
+        "/./app.js",                  # 单点段
+        "/..%2fweb.py",               # 百分号编码；urlsplit 不解码，字符集就该拦住
+        "/lib/dom.js/../../secrets",  # 尾段不是白名单后缀
+        "/config.toml",               # 后缀不在白名单
+        "/app.py",                    # 同上，且是源码
+        "//etc/passwd",               # 空段
+        "/lib\\dom.js",               # 反斜杠
+        "app.js",                     # 不以 / 开头
+        "/",                          # 兜底见上，这里确保下面的断言不误判
+    ][:-1],
+)
+def test_static_paths_outside_webui_are_refused(url_path):
+    assert web._static_target(url_path) is None
