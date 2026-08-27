@@ -22,6 +22,7 @@ from .verdict import (
 
 _KNOWN_TYPES = {
     "batch_opened",
+    "batch_meta_revised",
     "prediction",
     "prediction_revised",
     "run_result",
@@ -130,6 +131,14 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             )
             continue
 
+        if event.type == "batch_meta_revised":
+            # 只覆盖显式给出的字段：GUI 可能只补 result_path 而不动排序。
+            if "result_path" in event.payload:
+                batch.result_path = event.payload.get("result_path") or None
+            if "expected_ranking" in event.payload:
+                batch.expected_ranking = event.payload.get("expected_ranking") or None
+            continue
+
         if event.type == "reflection":
             scope = event.payload.get("scope", "run" if event.run else "batch")
             if scope == "batch" or not event.run:
@@ -155,6 +164,10 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
                     f"修订请使用 prediction_revised"
                 )
                 continue
+            if run.samples:
+                # 结果已经在库，预测才到。事件顺序本身就是证据，比
+                # _check_integrity 的 mtime 比对更强：touch 一下文件绕不过去。
+                _flag(run, "prediction_after_result")
             run.prediction = event.payload
             run.prediction_ts = event.ts
 
@@ -185,13 +198,18 @@ def _run_state(batch: BatchState, run_key: str) -> RunState:
     return batch.runs[run_key]
 
 
+def _flag(run: RunState, name: str) -> None:
+    """记一条完整性标记。同一标记只记一次。"""
+    if name not in run.integrity:
+        run.integrity.append(name)
+
+
 def _check_integrity(run: RunState, event: Event) -> None:
     """结果文件早于预测写入时间 → 先看结果再写预测的嫌疑。见 spec §2.1。"""
     mtime = _parse_ts((event.payload.get("source") or {}).get("mtime"))
     predicted_at = _parse_ts(run.prediction_ts)
     if mtime and predicted_at and mtime < predicted_at:
-        if "result_predates_prediction" not in run.integrity:
-            run.integrity.append("result_predates_prediction")
+        _flag(run, "result_predates_prediction")
 
 
 def _finalize(batch: BatchState) -> None:
@@ -199,6 +217,13 @@ def _finalize(batch: BatchState) -> None:
         run.aggregates = {
             name: aggregate(list(by_seed.values())) for name, by_seed in run.samples.items()
         }
+        if run.aggregates and run.prediction is None:
+            # 有实测值却没有预测。judge_run 会返回 NO_RESULT——那是纯内核的
+            # 正确契约，但显示成「等待结果」是事实相反：这个 run 明明有数。
+            # 用 UNVERIFIED（来源存疑待人工确认）：无法验证一个不存在的预测。
+            _flag(run, "result_without_prediction")
+            run.verdict = Verdict.UNVERIFIED
+            continue
         prediction_metrics = (run.prediction or {}).get("metrics", {})
         try:
             specs = {name: spec_for(name, batch.metric_specs) for name in prediction_metrics}
@@ -233,17 +258,20 @@ def closure_blockers(batch: BatchState) -> list[str]:
 
     原设计只检查未复盘 SURPRISE，导致完全没有结果或明显 NOISY 的批次也能
     被标成「已收口」。GUI 把这个漏洞暴露得很明显，因此领域层统一修正。
+
+    UNVERIFIED 有两种来源，措辞必须分开：预测缺席是「结果先到」，其余才是
+    笼统的「待确认」。渐进锁定让前者从罕见变成常见，说错会误导。
     """
-    groups = {
-        Verdict.NO_RESULT: "还有 run 尚无结果",
-        Verdict.UNVERIFIED: "还有结果待确认",
-        Verdict.NOISY: "还有 run 的噪声大于判定分辨率",
-    }
-    blockers = [
-        message
-        for verdict, message in groups.items()
-        if any(run.verdict is verdict for run in batch.runs.values())
-    ]
+    blockers = []
+    if any(run.verdict is Verdict.NO_RESULT for run in batch.runs.values()):
+        blockers.append("还有 run 尚无结果")
+    unverified = [run for run in batch.runs.values() if run.verdict is Verdict.UNVERIFIED]
+    if any("result_without_prediction" in run.integrity for run in unverified):
+        blockers.append("还有 run 的结果先到、预测缺席")
+    if any("result_without_prediction" not in run.integrity for run in unverified):
+        blockers.append("还有结果待确认")
+    if any(run.verdict is Verdict.NOISY for run in batch.runs.values()):
+        blockers.append("还有 run 的噪声大于判定分辨率")
     if any(run.verdict is Verdict.SURPRISE and not run.closed for run in batch.runs.values()):
         blockers.append("还有 SURPRISE 未复盘")
     return blockers
