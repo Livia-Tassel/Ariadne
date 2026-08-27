@@ -237,3 +237,91 @@ def test_gui_cli_delegates_to_local_server(tmp_path, monkeypatch):
         "port": 0,
         "open_browser": False,
     }
+
+
+def test_batch_can_declare_result_path_and_expected_ranking(tmp_path):
+    """GUI 建的批次此前永远拿不到这两样：web.py 把它们写死成 None。
+
+    后果不是「少个便利功能」：_check_integrity 依赖结果文件的 mtime，而
+    mtime 只存在于按 result_path 自动发现的路径上，所以 GUI 建的批次拿不到
+    「先看结果再补预测」的检查。expected_ranking 同理让排序判定永不执行。
+    """
+    service = GuiService(tmp_path / "p")
+    payload = _batch_payload()
+    payload["result_path"] = "logs/{model}/s{seed}/results.json"
+    payload["expected_ranking"] = {"metric": "top1_acc", "order": ["model=large", "model=base"]}
+
+    service.create_batch(payload)
+
+    batch = service.state()["batches"][0]
+    assert batch["result_path"] == "logs/{model}/s{seed}/results.json"
+    assert batch["ranking"] is not None  # 排序判定不再是死代码
+
+
+def test_result_path_is_optional(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+
+    assert service.state()["batches"][0]["result_path"] is None
+
+
+def test_results_carry_their_source_file_and_trigger_the_integrity_check(tmp_path):
+    """结果带上来源文件后，mtime 早于预测就该被标记。
+
+    手工录入没有 mtime，因此拿不到这个检查——这正是自动发现必须成为
+    主路径的原因，不只是为了少敲几个字。
+    """
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    service.add_results(
+        {
+            "batch": "b1",
+            "rows": [
+                {
+                    "run": "model=base",
+                    "seed": 0,
+                    "metrics": {"top1_acc": 0.81},
+                    "source": {
+                        "path": "logs/base/s0/results.json",
+                        "mtime": "2020-01-01T00:00:00+08:00",
+                    },
+                }
+            ],
+        }
+    )
+
+    run = next(
+        r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=base"
+    )
+    assert "result_predates_prediction" in run["integrity"]
+
+
+def test_manual_results_still_record_that_they_were_typed_by_hand(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    _add_results(service)
+
+    events, *_ = service._load()
+    source = next(e for e in events if e.type == "run_result").payload["source"]
+    assert source["kind"] == "manual_gui"
+    assert source["mtime"] is None
+
+
+def test_batch_meta_can_be_revised_after_creation(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+
+    service.revise_batch_meta(
+        {"batch": "b1", "result_path": "logs/{model}/s{seed}/results.json"}
+    )
+
+    assert (
+        service.state()["batches"][0]["result_path"] == "logs/{model}/s{seed}/results.json"
+    )
+
+
+def test_revising_meta_of_an_unknown_batch_is_rejected(tmp_path):
+    service = GuiService(tmp_path / "p")
+
+    with pytest.raises(GuiInputError):
+        service.revise_batch_meta({"batch": "nope", "result_path": "logs/x.json"})

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import mimetypes
+import re
 import threading
 import traceback
 import webbrowser
@@ -17,7 +18,6 @@ from dataclasses import asdict
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -25,6 +25,7 @@ from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
 from .ideas import make_idea_id, project_ideas
+from .ingest import compile_template
 from .metrics import MetricSpec, default_spec
 from .papers import (
     SECTIONS,
@@ -35,6 +36,7 @@ from .papers import (
 from .planning import Design, build_events, expand_runs, next_batch_id
 from .project import closure_blockers, project as project_events
 from .reviewing import build_reflection_events, deviation_lines, pending
+from .resources import asset_file
 from .verdict import Verdict
 from .workspace import initialize_project
 
@@ -101,6 +103,10 @@ class GuiService:
 
         metric_names, metric_specs = self._metrics(payload.get("metrics"))
         predictions = self._predictions(payload.get("predictions"), runs, metric_names)
+        result_path = self._result_path(payload.get("result_path"))
+        expected_ranking = self._expected_ranking(
+            payload.get("expected_ranking"), runs, metric_names
+        )
 
         _, _, batches, _, _, ideas, _ = self._load()
         idea_ref = self._idea_reference(payload.get("idea"), ideas)
@@ -110,8 +116,8 @@ class GuiService:
             dimensions=dimensions,
             metrics=metric_names,
             metric_specs=metric_specs,
-            result_path=None,
-            expected_ranking=None,
+            result_path=result_path,
+            expected_ranking=expected_ranking,
             research_direction=research_direction,
             idea=idea_ref,
         )
@@ -125,6 +131,75 @@ class GuiService:
             for event in new_events:
                 append_event(self.runs_path, event)
         return {"ok": True, "batch": batch_id, "run_count": len(runs)}
+
+    def revise_batch_meta(self, payload: dict) -> dict:
+        """批次开启后补填 result_path / expected_ranking。
+
+        建批次时未必知道结果文件长什么样——很多人是跑起来之后才确定路径。
+        补填走独立事件，不改写 batch_opened：事件流只追加不修改。
+        """
+        batch_id = _text(payload.get("batch"), "批次")
+        _, _, batches, _, _, _, _ = self._load()
+        batch = batches.get(batch_id)
+        if batch is None:
+            raise GuiInputError(f"找不到批次 {batch_id}", 404)
+
+        revised: dict = {}
+        if "result_path" in payload:
+            revised["result_path"] = self._result_path(payload.get("result_path"))
+        if "expected_ranking" in payload:
+            revised["expected_ranking"] = self._expected_ranking(
+                payload.get("expected_ranking"),
+                list(batch.runs) or expand_runs(batch.dimensions),
+                self._batch_metric_names(batch),
+            )
+        if not revised:
+            raise GuiInputError("没有要修改的字段")
+
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(ts=_now(), type="batch_meta_revised", batch=batch_id, payload=revised),
+            )
+        return {"ok": True, "batch": batch_id}
+
+    @staticmethod
+    def _result_path(raw) -> str | None:
+        """校验结果文件的路径模板。空值合法——这一项本来就是可选的。"""
+        if raw in (None, ""):
+            return None
+        if not isinstance(raw, str):
+            raise GuiInputError("结果路径模板必须是一段文本")
+        template = raw.strip()
+        if not template:
+            return None
+        if template.startswith("/") or template.startswith("~"):
+            raise GuiInputError("结果路径模板要相对于项目目录，不要用绝对路径")
+        try:
+            compile_template(template)
+        except (re.error, ValueError) as exc:
+            raise GuiInputError(f"结果路径模板不合法：{exc}") from exc
+        return template
+
+    @staticmethod
+    def _expected_ranking(raw, runs: list[str], metric_names: list[str]) -> dict | None:
+        if raw in (None, "", {}):
+            return None
+        if not isinstance(raw, dict):
+            raise GuiInputError("预期排序的格式不正确")
+        metric = _text(raw.get("metric"), "预期排序的指标")
+        if metric not in metric_names:
+            raise GuiInputError(f"预期排序引用了未声明的指标 {metric}")
+        order = raw.get("order")
+        if not isinstance(order, list) or len(order) < 2:
+            raise GuiInputError("预期排序至少要列出两个 run，否则没有可比的东西")
+        known = set(runs)
+        for item in order:
+            if item not in known:
+                raise GuiInputError(f"预期排序里的 {item!r} 不是这个批次的 run")
+        if len(set(order)) != len(order):
+            raise GuiInputError("预期排序里有重复的 run")
+        return {"metric": metric, "order": list(order)}
 
     def add_results(self, payload: dict) -> dict:
         batch_id = _text(payload.get("batch"), "批次")
@@ -181,7 +256,7 @@ class GuiService:
                     payload={
                         "seed": seed,
                         "metrics": metrics,
-                        "source": {"path": None, "kind": "manual_gui", "mtime": None},
+                        "source": self._source(row.get("source")),
                     },
                 )
             )
@@ -190,6 +265,24 @@ class GuiService:
             for event in new_events:
                 append_event(self.runs_path, event)
         return {"ok": True, "written": len(new_events)}
+
+    @staticmethod
+    def _source(raw) -> dict:
+        """结果的来源。手敲的与从文件抽的必须能区分开。
+
+        mtime 是 project._check_integrity 的输入：结果文件早于预测写入时间
+        就是「先看结果再补预测」的嫌疑。手敲没有 mtime，因此也拿不到这个
+        检查——这是自动发现必须成为主路径的原因，不只是省几次敲键盘。
+        """
+        if not isinstance(raw, dict):
+            return {"path": None, "kind": "manual_gui", "mtime": None}
+        path = raw.get("path")
+        mtime = raw.get("mtime")
+        return {
+            "path": str(path) if path else None,
+            "kind": "structured" if path else "manual_gui",
+            "mtime": str(mtime) if mtime else None,
+        }
 
     def add_review(self, payload: dict) -> dict:
         batch_id = _text(payload.get("batch"), "批次")
@@ -678,6 +771,7 @@ class GuiService:
             "dimensions": batch.dimensions,
             "metrics": metric_names,
             "metric_specs": batch.metric_specs,
+            "result_path": batch.result_path,
             "opened_at": batch.opened_ts,
             "closed": batch.closed,
             "batch_reflection": batch.batch_reflection,
@@ -692,6 +786,7 @@ class GuiService:
 _POST_ROUTES = {
     "/api/runs/preview": "preview_runs",
     "/api/batches": "create_batch",
+    "/api/batches/meta": "revise_batch_meta",
     "/api/results": "add_results",
     "/api/reviews": "add_review",
     "/api/batches/close": "close_batch",
@@ -729,7 +824,7 @@ def _handler_for(service: GuiService, allowed_hosts=()):
             if asset is None:
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "页面不存在"})
                 return
-            resource = files("ari").joinpath("webui", asset)
+            resource = asset_file("webui", asset)
             try:
                 body = resource.read_bytes()
             except (FileNotFoundError, OSError):
