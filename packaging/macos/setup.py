@@ -53,6 +53,10 @@ OPTIONS = {
         "webview.platforms.qt",
     ],
     "iconfile": str(ICON) if ICON.exists() else None,
+    "resources": [
+        str(ROOT / "src" / "ari" / "desktopui"),
+        str(ROOT / "src" / "ari" / "webui"),
+    ],
     # Conda Python 的扩展使用 @rpath 链接这些库，py2app 不会自动收集。
     "frameworks": [str(path) for path in RUNTIME_LIBS],
     # py2app 0.28.10 + Python 3.13 在 -O1 下会生成指向不存在 site.pyo 的链接。
@@ -76,7 +80,8 @@ setup(
     app=["Ariadne.py"],
     package_dir={"": "../../src"},
     packages=find_packages(str(ROOT / "src")),
-    package_data={"ari": ["webui/*", "desktopui/*"]},
+    # webui/* 匹配不到 webui/lib/dom.js：前端已拆成 lib/ views/ parts/ 子目录。
+    package_data={"ari": ["webui/*", "webui/*/*", "desktopui/*"]},
     include_package_data=True,
     options={"py2app": OPTIONS},
 )
