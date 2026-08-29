@@ -1088,3 +1088,74 @@ def test_expected_ranking_can_be_filled_in_after_the_batch_is_open(tmp_path):
         "order": ["model=large", "model=base"],
     }
     assert batch["ranking"] is not None
+
+
+# ---------- 设置 ----------
+
+def test_settings_never_return_the_key_itself(tmp_path, monkeypatch):
+    """界面只拿掩码。密钥只进不出——/api/state 与设置接口都不回传原文。"""
+    from ari import credentials
+
+    store = tmp_path / "credentials.toml"
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: store)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    service = GuiService(tmp_path / "p")
+
+    service.save_settings({"secrets": {"ANTHROPIC_API_KEY": "sk-ant-api03-abcdefgh1234"}})
+    result = service.settings({})
+
+    row = next(r for r in result["secrets"] if r["env"] == "ANTHROPIC_API_KEY")
+    assert row["set"] is True
+    assert row["masked"] == "sk-…1234"
+    assert "sk-ant-api03-abcdefgh1234" not in json.dumps(result)
+
+
+def test_settings_report_which_providers_the_project_actually_uses(tmp_path, monkeypatch):
+    """要填哪几个 key 由 config.toml 的 [roles] 决定，不是让用户猜。"""
+    from ari import credentials
+
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: tmp_path / "c.toml")
+    service = GuiService(tmp_path / "p")
+
+    envs = {row["env"] for row in service.settings({})["secrets"]}
+    assert "ANTHROPIC_API_KEY" in envs
+
+
+def test_settings_say_when_the_environment_is_providing_the_key(tmp_path, monkeypatch):
+    """环境变量优先。界面得说清「这个 key 来自环境，改这里没用」。"""
+    from ari import credentials
+
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: tmp_path / "c.toml")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    service = GuiService(tmp_path / "p")
+
+    row = next(r for r in service.settings({})["secrets"] if r["env"] == "ANTHROPIC_API_KEY")
+    assert row["from_env"] is True
+
+
+def test_clearing_a_key_removes_it(tmp_path, monkeypatch):
+    from ari import credentials
+
+    store = tmp_path / "credentials.toml"
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: store)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    service = GuiService(tmp_path / "p")
+    service.save_settings({"secrets": {"ANTHROPIC_API_KEY": "sk-x"}})
+
+    service.save_settings({"secrets": {"ANTHROPIC_API_KEY": ""}})
+
+    row = next(r for r in service.settings({})["secrets"] if r["env"] == "ANTHROPIC_API_KEY")
+    assert row["set"] is False
+
+
+def test_openalex_mailto_is_a_setting_not_a_secret(tmp_path, monkeypatch):
+    from ari import credentials
+
+    store = tmp_path / "credentials.toml"
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: store)
+    service = GuiService(tmp_path / "p")
+
+    service.save_settings({"settings": {"openalex_mailto": "me@lab.edu"}})
+
+    assert service.settings({})["openalex_mailto"] == "me@lab.edu"
+    assert service._mailto() == "me@lab.edu"

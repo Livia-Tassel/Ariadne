@@ -26,7 +26,16 @@ from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
 from .ideas import make_idea_id, project_ideas
+import os
+
 from .config import load_config
+from .credentials import (
+    credentials_path,
+    load_secrets,
+    load_settings,
+    mask,
+    save as save_credentials,
+)
 from .ingest import compile_template, discover, parse_result_file
 from .openalex import OpenAlexUnavailable, fetch_by_ids, search as openalex_search
 from .metrics import MetricSpec, default_spec
@@ -869,13 +878,87 @@ class GuiService:
         question = _text(payload.get("question"), "想回答的问题", required=False)
         return self._ai_once(lambda: suggest_query(self.root, topic, question))
 
-    def _mailto(self) -> str:
-        """礼貌起见带上联系邮箱，从 config.toml 读。没有也能用。"""
+    # ---------- 设置 ----------
+
+    # 至少让用户能填这两家，即使项目还没配 config.toml。
+    DEFAULT_KEY_ENVS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+
+    def _key_envs(self) -> list[str]:
+        """这个项目实际要用到哪几个环境变量名。
+
+        由 config.toml 的 [providers] 决定，不是让用户猜。读不到就退回
+        两家默认——总得让人有地方填。
+        """
+        envs: list[str] = []
         try:
             config = load_config(self.root)
         except LLMUnavailable:
-            return ""
-        return str((config.get("openalex") or {}).get("mailto") or "")
+            config = {}
+        for settings in (config.get("providers") or {}).values():
+            name = (settings or {}).get("api_key_env")
+            if isinstance(name, str) and name.strip() and name not in envs:
+                envs.append(name.strip())
+        for name in self.DEFAULT_KEY_ENVS:
+            if name not in envs:
+                envs.append(name)
+        return envs
+
+    def settings(self, payload: dict | None = None) -> dict:
+        """当前设置。**密钥只进不出**——界面永远只拿到掩码。"""
+        stored = load_secrets()
+        rows = []
+        for env in self._key_envs():
+            from_env = bool(os.environ.get(env))
+            value = os.environ.get(env) or stored.get(env, "")
+            rows.append(
+                {
+                    "env": env,
+                    "set": bool(value),
+                    "masked": mask(value),
+                    # 环境变量优先，界面得说清「这个 key 来自环境，改这里没用」
+                    "from_env": from_env,
+                }
+            )
+        return {
+            "ok": True,
+            "secrets": rows,
+            "openalex_mailto": self._mailto(),
+            "store": str(credentials_path()),
+        }
+
+    def save_settings(self, payload: dict) -> dict:
+        raw_secrets = payload.get("secrets")
+        raw_settings = payload.get("settings")
+        if not isinstance(raw_secrets, dict) and not isinstance(raw_settings, dict):
+            raise GuiInputError("没有要保存的设置")
+
+        known = set(self._key_envs())
+        secrets = {}
+        for env, value in (raw_secrets or {}).items():
+            if env not in known:
+                raise GuiInputError(f"未知的环境变量名 {env}")
+            secrets[env] = str(value or "").strip()
+
+        settings = {}
+        for name, value in (raw_settings or {}).items():
+            if name != "openalex_mailto":
+                raise GuiInputError(f"未知的设置项 {name}")
+            settings[name] = str(value or "").strip()
+
+        path = save_credentials(secrets=secrets, settings=settings)
+        return {"ok": True, "store": str(path)}
+
+    def _mailto(self) -> str:
+        """礼貌起见带上联系邮箱。项目里的 config.toml 优先，其次是用户级设置。"""
+        try:
+            config = load_config(self.root)
+        except LLMUnavailable:
+            config = {}
+        return str(
+            (config.get("openalex") or {}).get("mailto")
+            or load_settings().get("openalex_mailto")
+            or ""
+        )
 
     def _survey_or_404(self, payload: dict):
         survey_id = _text(payload.get("survey"), "调研")
@@ -1614,6 +1697,7 @@ _POST_ROUTES = {
     "/api/surveys/close": "close_survey",
     "/api/surveys/summarize": "summarize_papers",
     "/api/surveys/query": "suggest_query",
+    "/api/settings": "save_settings",
     "/api/advice": "ask_advice",
     "/api/probe": "ask_probe",
     "/api/results": "add_results",
@@ -1671,6 +1755,9 @@ def _handler_for(service: GuiService, allowed_hosts=()):
             path = urlsplit(self.path).path
             if path == "/api/state":
                 self._json(HTTPStatus.OK, service.state())
+                return
+            if path == "/api/settings":
+                self._json(HTTPStatus.OK, service.settings())
                 return
             asset = _static_target(path)
             if asset is None:

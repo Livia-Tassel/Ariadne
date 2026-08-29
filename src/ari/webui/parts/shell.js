@@ -40,6 +40,7 @@ const PAGES = [
   { label: "批次", sub: "全部批次", href: "#/batches" },
   { label: "账本", sub: "想法与信念", href: "#/ledger" },
   { label: "论文", sub: "草稿列表", href: "#/paper" },
+  { label: "设置", sub: "API key 与 OpenAlex", href: "#/settings" },
 ];
 
 const palette = { open: false, rows: [], at: 0 };

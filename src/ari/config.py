@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .credentials import secret_for
 from .llm import LLMUnavailable
 
 KNOWN_PROVIDERS = ("anthropic", "openai")
@@ -59,7 +60,9 @@ def resolve_role(config: dict, role: str) -> ModelRef:
 
     settings = (config.get("providers") or {}).get(provider) or {}
     key_env = settings.get("api_key_env") or ""
-    api_key = os.environ.get(key_env) if key_env else None
+    # 环境变量优先，其次是应用数据目录里存的那份。密钥不该被迫写进
+    # config.toml——那个文件是要进 git 的。见 credentials.py。
+    api_key = secret_for(key_env) if key_env else None
     if not api_key:
         raise LLMUnavailable(
             f"环境变量 {key_env} 没有设置" if key_env

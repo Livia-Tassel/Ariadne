@@ -21,6 +21,7 @@
         <div class="top-acts">
           <button class="icon menu-btn" id="menu" aria-label="打开导航">≡</button>
           <button class="icon" id="open-palette" aria-label="搜索或跳转">⌘K</button>
+          <a class="icon" href="#/settings" id="settings-link" aria-label="设置">设置</a>
           <button class="icon" id="theme" aria-label="切换深浅色">◐</button>
           <button class="icon" id="switch-project" hidden>⇄</button>
         </div>
@@ -68,6 +69,12 @@
       </section>
 
       <section id="view-draft" class="view"><div id="draft-body"></div></section>
+
+      <section id="view-settings" class="view">
+        <h1 class="page">设置</h1>
+        <p class="page-sub">密钥存在项目目录之外——config.toml 会进版本库，写进去就等于提交进仓库。</p>
+        <div id="settings-body"></div>
+      </section>
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

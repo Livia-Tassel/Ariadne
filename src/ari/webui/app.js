@@ -14,6 +14,7 @@ import { renderPlan } from "./views/plan.js";
 import { renderLedger } from "./views/ledger.js";
 import { renderPaper } from "./views/paper.js";
 import { captureDirty, renderDraft, restoreDirty } from "./views/draft.js";
+import { renderSettings } from "./views/settings.js";
 
 /* ---------- 路由 ---------- */
 
@@ -29,6 +30,7 @@ function parseHash() {
   if (parts[0] === "survey" && parts[1]) return { view: "survey", survey: parts[1], params };
   if (parts[0] === "new") return { view: "new", params };
   if (parts[0] === "ledger") return { view: "ledger", params };
+  if (parts[0] === "settings") return { view: "settings", params };
   if (parts[0] === "paper") return { view: parts[1] ? "draft" : "paper", draft: parts[1], params };
   if (parts[0] === "batch" && parts[1]) {
     return {
@@ -53,6 +55,7 @@ const RENDER = {
   ledger: renderLedger,
   paper: renderPaper,
   draft: renderDraft,
+  settings: renderSettings,
 };
 
 /* ---------- 渲染 ---------- */

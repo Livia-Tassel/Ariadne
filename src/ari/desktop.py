@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from .credentials import application_data_dir
 from .resources import asset_file
 from .web import make_server
 from .workspace import initialize_project
@@ -24,13 +25,6 @@ def _now() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
 
-def application_data_dir() -> Path:
-    """返回符合当前操作系统习惯的应用数据目录。"""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Ariadne"
-    if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA") or Path.home()) / "Ariadne"
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "ariadne"
 
 
 class RecentProjects:

@@ -110,3 +110,44 @@ def test_provider_without_api_key_env_is_unavailable(tmp_path):
 
     with pytest.raises(LLMUnavailable):
         resolve_role(config, "reason")
+
+
+def test_resolve_role_falls_back_to_the_stored_credential(tmp_path, monkeypatch):
+    """没设环境变量时用应用数据目录里存的那份——密钥不该被迫写进
+    config.toml，那个文件是要进 git 的。"""
+    from ari import credentials
+    from ari.config import resolve_role
+
+    store = tmp_path / "credentials.toml"
+    credentials.save(secrets={"ANTHROPIC_API_KEY": "sk-stored"}, path=store)
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: store)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    ref = resolve_role(
+        {
+            "roles": {"reason": "anthropic:claude-opus-5"},
+            "providers": {"anthropic": {"api_key_env": "ANTHROPIC_API_KEY"}},
+        },
+        "reason",
+    )
+
+    assert ref.api_key == "sk-stored"
+
+
+def test_a_missing_key_still_reports_the_environment_variable_name(tmp_path, monkeypatch):
+    """报错要说清该去设哪个环境变量，而不是笼统一句「没配」。"""
+    from ari import credentials
+    from ari.config import resolve_role
+    from ari.llm import LLMUnavailable
+
+    monkeypatch.setattr(credentials, "credentials_path", lambda path=None: tmp_path / "none.toml")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with pytest.raises(LLMUnavailable, match="ANTHROPIC_API_KEY"):
+        resolve_role(
+            {
+                "roles": {"reason": "anthropic:x"},
+                "providers": {"anthropic": {"api_key_env": "ANTHROPIC_API_KEY"}},
+            },
+            "reason",
+        )

@@ -715,3 +715,5 @@ table.ledger td input { padding: 4px 7px; font-size: 13.5px; }
 .revise { margin-top: 6px; }
 .revise > summary { font-size: 13px; color: var(--ink-3); }
 .revise > summary:hover { color: var(--signal); }
+#settings-link { text-decoration: none; display: inline-flex; align-items: center; }
+#settings-body code { font-size: 12.5px; background: var(--paper-2); padding: 0 4px; }
