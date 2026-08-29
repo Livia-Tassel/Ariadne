@@ -26,7 +26,9 @@ from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
 from .ideas import make_idea_id, project_ideas
+from .config import load_config
 from .ingest import compile_template, discover, parse_result_file
+from .openalex import OpenAlexUnavailable, fetch_by_ids, search as openalex_search
 from .metrics import MetricSpec, default_spec
 from .papers import (
     SECTIONS,
@@ -39,6 +41,14 @@ from .planning import Design, build_events, expand_runs, next_batch_id
 from .probing import probe
 from .project import closure_blockers, project as project_events
 from .reviewing import build_reflection_events, deviation_lines, pending
+from .surveying import reason_bottleneck, summarize_paper, suggest_query
+from .surveys import (
+    TIER_FOLLOWUP,
+    TIER_MILESTONE,
+    next_survey_id,
+    project_surveys,
+    rank_milestones,
+)
 from .resources import asset_file
 from .verdict import Verdict
 from .workspace import initialize_project
@@ -83,8 +93,11 @@ class GuiService:
         ledger, belief_warnings = project_beliefs(events)
         ideas, idea_warnings = project_ideas(events)
         drafts, draft_warnings = project_drafts(events)
-        all_warnings = warnings + belief_warnings + idea_warnings + draft_warnings
-        return events, parse_errors, batches, all_warnings, ledger, ideas, drafts
+        surveys, survey_warnings = project_surveys(events)
+        all_warnings = (
+            warnings + belief_warnings + idea_warnings + draft_warnings + survey_warnings
+        )
+        return events, parse_errors, batches, all_warnings, ledger, ideas, drafts, surveys
 
     def preview_runs(self, payload: dict) -> dict:
         dimensions = self._dimensions(payload.get("dimensions"))
@@ -118,7 +131,7 @@ class GuiService:
             payload.get("expected_ranking"), runs, metric_names
         )
 
-        _, _, batches, _, _, ideas, _ = self._load()
+        _, _, batches, _, _, ideas, _, _ = self._load()
         idea_ref = self._idea_reference(payload.get("idea"), ideas)
         batch_id = next_batch_id(batches)
         design = Design(
@@ -149,7 +162,7 @@ class GuiService:
         补填走独立事件，不改写 batch_opened：事件流只追加不修改。
         """
         batch_id = _text(payload.get("batch"), "批次")
-        _, _, batches, _, _, _, _ = self._load()
+        _, _, batches, _, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -219,7 +232,7 @@ class GuiService:
         prediction_after_result，见 spec §4.2。
         """
         batch_id = _text(payload.get("batch"), "批次")
-        _, _, batches, _, _, _, _ = self._load()
+        _, _, batches, _, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -255,7 +268,34 @@ class GuiService:
     # 但没有上限的话，一个不响应的 endpoint 会让转圈永远转下去。
     AI_TIMEOUT = 45
 
-    def _ai(self, work, kind: str, *, batch: str, run: str | None = None) -> dict:
+    # 一次最多摘要多少篇。长尾可能有上百篇，全摘一遍既慢又烧 token。
+    MAX_SUMMARIES = 12
+
+    def _ai_once(self, work) -> dict:
+        """跑一次 AI 调用但**不归档**。用于检索式这种「你还要改」的中间结果。"""
+        box: dict = {}
+
+        def run_it():
+            try:
+                box["value"] = work()
+            except LLMUnavailable as exc:
+                box["reason"] = str(exc)
+            except Exception as exc:
+                traceback.print_exc()
+                box["reason"] = f"调用 AI 时出错：{type(exc).__name__}"
+
+        worker = threading.Thread(target=run_it, daemon=True)
+        worker.start()
+        worker.join(self.AI_TIMEOUT)
+        if worker.is_alive():
+            return {"ok": True, "available": False, "reason": f"AI 超过 {self.AI_TIMEOUT} 秒没有响应"}
+        if "value" not in box:
+            return {"ok": True, "available": False, "reason": box.get("reason", "这次没有 AI 那一段")}
+        return {"ok": True, "available": True, **box["value"]}
+
+    def _ai(
+        self, work, kind: str, *, batch: str, run: str | None = None, extra: dict | None = None
+    ) -> dict:
         """跑一次 AI 调用并归档。
 
         降级不是失败：拿不到就返回 200 + available=false，界面显示一行安静的
@@ -283,7 +323,7 @@ class GuiService:
         if "value" not in box:
             return {"ok": True, "available": False, "reason": box.get("reason", "这次没有 AI 那一段")}
 
-        payload = {"kind": kind, kind.removeprefix("ai_"): box["value"]}
+        payload = {"kind": kind, **(extra or {}), kind.removeprefix("ai_"): box["value"]}
         with self._write_lock:
             append_event(
                 self.runs_path,
@@ -299,7 +339,7 @@ class GuiService:
         所以不是「先算好、晚点再显示」，是那时候根本还没算。
         """
         batch_id = _text(payload.get("batch"), "批次")
-        _, _, batches, _, _, _, _ = self._load()
+        _, _, batches, _, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -333,7 +373,7 @@ class GuiService:
         """
         batch_id = _text(payload.get("batch"), "批次")
         run_key = _text(payload.get("run"), "run")
-        _, _, batches, _, _, _, _ = self._load()
+        _, _, batches, _, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         run = batch.runs.get(run_key) if batch else None
         if run is None:
@@ -354,7 +394,7 @@ class GuiService:
         一个文件坏了不该让整次发现失败——其余的照常抽出来，坏的单独报告。
         """
         batch_id = _text(payload.get("batch"), "批次")
-        _, _, batches, _, _, _, _ = self._load()
+        _, _, batches, _, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -410,7 +450,7 @@ class GuiService:
         if not isinstance(raw_rows, list) or not raw_rows:
             raise GuiInputError("至少填写一条实验结果")
 
-        _, _, batches, _, _, _, _ = self._load()
+        _, _, batches, _, _, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -494,13 +534,352 @@ class GuiService:
             "mtime": str(mtime) if mtime else None,
         }
 
+    # ---------- 领域调研 ----------
+
+    MAX_SEED = 200
+    MAX_MILESTONES = 12
+
+    def create_survey(self, payload: dict) -> dict:
+        """开一个调研。检索式存档——半年后你想知道当初搜了什么，答案在账本里。"""
+        topic = _text(payload.get("topic"), "研究主题")
+        query = _text(payload.get("query"), "检索式")
+        question = _text(payload.get("question"), "想回答的问题", required=False)
+
+        _, _, _, _, _, _, _, surveys = self._load()
+        survey_id = next_survey_id(surveys)
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=_now(),
+                    type="survey_opened",
+                    batch=survey_id,
+                    payload={
+                        "topic": topic,
+                        "question": question,
+                        "query": query,
+                        "source": "openalex",
+                    },
+                ),
+            )
+        return {"ok": True, "survey": survey_id}
+
+    def run_survey(self, payload: dict) -> dict:
+        """抓一批论文并按引用图分层。
+
+        两步取数：先取种子集算内部被引，再按 ID 把里程碑本身取回来——
+        里程碑通常不在种子集里（种子集限定近几年，地基论文是老的）。
+
+        再抓一次是「补充」不是「重来」：已经在账本里的论文不重复写事件，
+        否则人工改过的分层会被算法覆盖回去。
+        """
+        survey = self._survey_or_404(payload)
+        k = max(5, min(int(payload.get("k") or 40), self.MAX_SEED))
+        from_year = payload.get("from_year") or None
+
+        try:
+            seed, budget = openalex_search(
+                survey.query, per_page=k, from_year=from_year, mailto=self._mailto()
+            )
+            # 上限 12 而不是「所有过线的」：你的注意力只够精读十来篇，这一层
+            # 存在的意义就是替你做这个取舍。内部被引会把母领域的地基（LeNet、
+            # U-Net 这类）也顶上来，它们对子领域未必最相关——排在后面的自然
+            # 落选，需要的话再人工提上来。
+            ranked = rank_milestones(
+                {p.work: p.referenced for p in seed}, limit=self.MAX_MILESTONES
+            )
+            milestones, budget = (
+                fetch_by_ids([work for work, _ in ranked], mailto=self._mailto())
+                if ranked
+                else ([], budget)
+            )
+        except OpenAlexUnavailable as exc:
+            return {"ok": True, "available": False, "reason": str(exc)}
+
+        in_set = dict(ranked)
+        rows = [(p, TIER_MILESTONE, in_set.get(p.work, 0)) for p in milestones]
+        rows += [(p, TIER_FOLLOWUP, in_set.get(p.work, 0)) for p in seed]
+
+        written = 0
+        now = _now()
+        with self._write_lock:
+            for paper, tier, count in rows:
+                if paper.work in survey.papers:
+                    continue
+                append_event(
+                    self.runs_path,
+                    Event(
+                        ts=now,
+                        type="paper_found",
+                        batch=survey.id,
+                        payload={
+                            "work": paper.work,
+                            "title": paper.title,
+                            "year": paper.year,
+                            "authors": paper.authors,
+                            "venue": paper.venue,
+                            "cited_by": paper.cited_by,
+                            "doi": paper.doi,
+                            "abstract": paper.abstract,
+                            "in_set": count,
+                            "tier": tier,
+                        },
+                    ),
+                )
+                written += 1
+
+        return {
+            "ok": True,
+            "available": True,
+            "found": written,
+            "seed": len(seed),
+            "milestones": len(milestones),
+            "budget": {"remaining": budget.remaining, "limit": budget.limit},
+        }
+
+    def read_paper(self, payload: dict) -> dict:
+        """记下这篇给了你什么。必填——和预测必填理由是同一个道理。"""
+        survey, paper = self._paper_or_404(payload)
+        takeaway = _text(payload.get("takeaway"), "这篇论文给你的收获")
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=_now(),
+                    type="paper_read",
+                    batch=survey.id,
+                    payload={"work": paper.work, "takeaway": takeaway},
+                ),
+            )
+        return {"ok": True, "work": paper.work}
+
+    def skip_paper(self, payload: dict) -> dict:
+        survey, paper = self._paper_or_404(payload)
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=_now(),
+                    type="paper_skipped",
+                    batch=survey.id,
+                    payload={
+                        "work": paper.work,
+                        "reason": _text(payload.get("reason"), "跳过原因", required=False),
+                    },
+                ),
+            )
+        return {"ok": True, "work": paper.work}
+
+    def retier_paper(self, payload: dict) -> dict:
+        """人工改层。算法给的是起点，不是判决。"""
+        survey, paper = self._paper_or_404(payload)
+        tier = payload.get("tier")
+        if tier not in (TIER_MILESTONE, TIER_FOLLOWUP):
+            raise GuiInputError("分层只能是 milestone 或 followup")
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=_now(),
+                    type="paper_tiered",
+                    batch=survey.id,
+                    payload={"work": paper.work, "tier": tier, "by": "manual"},
+                ),
+            )
+        return {"ok": True, "work": paper.work, "tier": tier}
+
+    def set_bottleneck(self, payload: dict) -> dict:
+        survey = self._survey_or_404(payload)
+        text = _text(payload.get("text"), "瓶颈陈述")
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=_now(),
+                    type="survey_bottleneck",
+                    batch=survey.id,
+                    payload={"text": text},
+                ),
+            )
+        return {"ok": True, "survey": survey.id}
+
+    def ask_bottleneck(self, payload: dict) -> dict:
+        """AI 对瓶颈的独立判断。
+
+        与 ask_advice 同一条锚定规则：**你先写你的，写完才能看 AI 的。**
+        先看到 AI 的分析，你自己的判断就失去了独立性——而独立性正是这套
+        机制价值的来源。
+        """
+        survey = self._survey_or_404(payload)
+        if not survey.bottleneck.strip():
+            raise GuiInputError(
+                "先写下你自己认为的瓶颈。先看 AI 的判断会让你的分析失去独立性，"
+                "而独立性正是这件事的价值所在"
+            )
+        return self._ai(
+            lambda: reason_bottleneck(self.root, survey), "ai_bottleneck", batch=survey.id
+        )
+
+    def survey_to_idea(self, payload: dict) -> dict:
+        """瓶颈陈述 → 想法。管线因此是连的：调研 → 想法 → 批次。"""
+        survey = self._survey_or_404(payload)
+        if not survey.bottleneck.strip():
+            raise GuiInputError("先写下瓶颈陈述，它就是这个想法的内容")
+        return self.add_idea(
+            {
+                "text": survey.bottleneck,
+                "motivation": f"来自调研 {survey.id}：{survey.topic}",
+                "survey": survey.id,
+            }
+        )
+
+    def close_survey(self, payload: dict) -> dict:
+        survey = self._survey_or_404(payload)
+        if not survey.bottleneck.strip():
+            raise GuiInputError("还没有写瓶颈陈述。不落到那句话上，前面读的全白读")
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(ts=_now(), type="survey_closed", batch=survey.id, payload={}),
+            )
+        return {"ok": True, "survey": survey.id}
+
+    @staticmethod
+    def _survey_todos(surveys) -> list[dict]:
+        """调研产生的待办。首屏要说「该精读什么」，否则调研页开了没人回去。"""
+        todos = []
+        for survey in surveys.values():
+            if survey.closed:
+                continue
+            for paper in survey.unread_milestones:
+                todos.append(
+                    {
+                        "kind": "待精读",
+                        "survey": survey.id,
+                        "work": paper.work,
+                        "title": paper.title,
+                        "in_set": paper.in_set,
+                    }
+                )
+            if survey.ready_for_bottleneck and not survey.bottleneck.strip():
+                todos.append({"kind": "待写瓶颈", "survey": survey.id, "topic": survey.topic})
+        return todos
+
+    def summarize_papers(self, payload: dict) -> dict:
+        """给长尾论文做「它相对于里程碑改了什么」。
+
+        逐篇写 note。一篇失败不该让整批失败——与结果发现那条一样：其余照常。
+        摘要落 note，所以摘要过的论文**不会**因此变成「已读」。
+        """
+        survey = self._survey_or_404(payload)
+        works = payload.get("works")
+        targets = [
+            p
+            for p in survey.tier(TIER_FOLLOWUP)
+            if (not works or p.work in set(works))
+        ][: self.MAX_SUMMARIES]
+        if not targets:
+            raise GuiInputError("没有需要摘要的论文")
+
+        titles = [p.title for p in survey.tier(TIER_MILESTONE)]
+        done, failed, reason = 0, 0, ""
+        for paper in targets:
+            result = self._ai(
+                lambda p=paper: summarize_paper(self.root, p.title, p.abstract, titles),
+                "ai_paper_summary",
+                batch=survey.id,
+                extra={"work": paper.work},
+            )
+            if result.get("available"):
+                done += 1
+            else:
+                failed += 1
+                reason = result.get("reason", "")
+        return {
+            "ok": True,
+            "available": done > 0,
+            "summarized": done,
+            "failed": failed,
+            "reason": reason,
+        }
+
+    def suggest_query(self, payload: dict) -> dict:
+        """一句话主题 → OpenAlex 检索式。你可以改，改完存档。"""
+        topic = _text(payload.get("topic"), "研究主题")
+        question = _text(payload.get("question"), "想回答的问题", required=False)
+        return self._ai_once(lambda: suggest_query(self.root, topic, question))
+
+    def _mailto(self) -> str:
+        """礼貌起见带上联系邮箱，从 config.toml 读。没有也能用。"""
+        try:
+            config = load_config(self.root)
+        except LLMUnavailable:
+            return ""
+        return str((config.get("openalex") or {}).get("mailto") or "")
+
+    def _survey_or_404(self, payload: dict):
+        survey_id = _text(payload.get("survey"), "调研")
+        surveys = self._load()[7]
+        survey = surveys.get(survey_id)
+        if survey is None:
+            raise GuiInputError(f"找不到调研 {survey_id}", 404)
+        return survey
+
+    def _paper_or_404(self, payload: dict):
+        survey = self._survey_or_404(payload)
+        work = _text(payload.get("work"), "论文")
+        paper = survey.papers.get(work)
+        if paper is None:
+            raise GuiInputError(f"{work} 不在调研 {survey.id} 里", 404)
+        return survey, paper
+
+    @staticmethod
+    def _paper_json(paper, summaries: dict) -> dict:
+        return {
+            "work": paper.work,
+            "title": paper.title,
+            "year": paper.year,
+            "authors": paper.authors,
+            "venue": paper.venue,
+            "cited_by": paper.cited_by,
+            "doi": paper.doi,
+            "abstract": paper.abstract,
+            "in_set": paper.in_set,
+            "tier": paper.tier,
+            "tier_by": paper.tier_by,
+            # read 只由 paper_read 事件决定。AI 摘要单独一栏，两者不混。
+            "read": paper.read,
+            "takeaway": paper.takeaway,
+            "summary": summaries.get(paper.work),
+            "skipped": paper.skipped,
+            "skip_reason": paper.skip_reason,
+        }
+
+    def _survey_json(self, survey, notes: dict) -> dict:
+        summaries = notes.get("summaries") or {}
+        return {
+            "id": survey.id,
+            "topic": survey.topic,
+            "question": survey.question,
+            "query": survey.query,
+            "opened_at": survey.opened_ts,
+            "milestones": [self._paper_json(p, summaries) for p in survey.tier(TIER_MILESTONE)],
+            "followups": [self._paper_json(p, summaries) for p in survey.tier(TIER_FOLLOWUP)],
+            "skipped": len([p for p in survey.papers.values() if p.skipped]),
+            "unread_milestones": len(survey.unread_milestones),
+            "ready_for_bottleneck": survey.ready_for_bottleneck,
+            "bottleneck": survey.bottleneck,
+            "ai_bottleneck": notes.get("bottleneck"),
+            "closed": survey.closed,
+        }
+
     def add_review(self, payload: dict) -> dict:
         batch_id = _text(payload.get("batch"), "批次")
         run_key = _text(payload.get("run"), "run")
         cause = _text(payload.get("cause"), "原因分析")
         nxt = _text(payload.get("next"), "下一步", required=False)
 
-        _, _, batches, _, ledger, _, _ = self._load()
+        _, _, batches, _, ledger, _, _, _ = self._load()
         batch = batches.get(batch_id)
         run = batch.runs.get(run_key) if batch else None
         if run is None:
@@ -526,7 +905,7 @@ class GuiService:
         cause = _text(payload.get("cause"), "批次结论")
         nxt = _text(payload.get("next"), "下一步", required=False)
 
-        _, _, batches, _, ledger, _, _ = self._load()
+        _, _, batches, _, ledger, _, _, _ = self._load()
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
@@ -561,11 +940,20 @@ class GuiService:
             if event.type != "note" or not event.batch:
                 continue
             kind = event.payload.get("kind")
-            if kind not in ("ai_advice", "ai_probe"):
+            if kind not in ("ai_advice", "ai_probe", "ai_paper_summary", "ai_bottleneck"):
                 continue
-            slot = notes.setdefault(event.batch, {"advice": None, "probes": {}})
+            slot = notes.setdefault(
+                event.batch,
+                {"advice": None, "probes": {}, "summaries": {}, "bottleneck": None},
+            )
             if kind == "ai_advice":
                 slot["advice"] = event.payload.get("advice")
+            elif kind == "ai_paper_summary":
+                # 摘要落 note，而所有投影都跳过 note——「已读」在数据层面
+                # 就不可能被 AI 写入。见 v0.5 spec §6。
+                slot["summaries"][event.payload.get("work") or ""] = event.payload.get("summary")
+            elif kind == "ai_bottleneck":
+                slot["bottleneck"] = event.payload.get("bottleneck")
             elif event.run:
                 slot["probes"][event.run] = event.payload.get("probe")
         return notes
@@ -627,7 +1015,7 @@ class GuiService:
         }
 
     def state(self) -> dict:
-        events, parse_errors, batches, warnings, ledger, ideas, drafts = self._load()
+        events, parse_errors, batches, warnings, ledger, ideas, drafts, surveys = self._load()
         notes = self._ai_notes(events)
         serialized_batches = [
             self._batch_json(batch, notes.get(batch.id) or {})
@@ -659,6 +1047,7 @@ class GuiService:
                 "id": idea.id,
                 "text": idea.text,
                 "motivation": idea.motivation,
+                "survey": idea.survey,
                 "status": idea.status(batches),
                 "discarded": idea.discarded,
                 "discard_reason": idea.discard_reason,
@@ -684,8 +1073,14 @@ class GuiService:
                 "ideas": len(ideas),
                 "open_ideas": open_ideas,
                 "drafts": len(drafts),
+                "surveys": len(surveys),
             },
             "calibration": self._calibration(batches),
+            "surveys": [
+                self._survey_json(s, notes.get(s.id) or {})
+                for s in reversed(list(surveys.values()))
+            ],
+            "survey_todos": self._survey_todos(surveys),
             "batches": serialized_batches,
             "pending_reviews": pending_runs,
             "beliefs": beliefs,
@@ -701,7 +1096,7 @@ class GuiService:
     def add_idea(self, payload: dict) -> dict:
         text = _text(payload.get("text"), "想法内容")
         motivation = _text(payload.get("motivation"), "动机", required=False)
-        _, _, _, _, _, ideas, _ = self._load()
+        _, _, _, _, _, ideas, _, _ = self._load()
         existing = {idea.id: idea.text for idea in ideas.values()}
         try:
             idea_id = make_idea_id(text, existing)
@@ -712,7 +1107,14 @@ class GuiService:
         event = Event(
             ts=_now(),
             type="idea_captured",
-            payload={"id": idea_id, "text": " ".join(text.split()), "motivation": motivation},
+            payload={
+                "id": idea_id,
+                "text": " ".join(text.split()),
+                "motivation": motivation,
+                # 想法可以起于一次调研——管线因此能一路回溯到「这个念头是从
+                # 哪个领域缺口来的」。
+                "survey": _text(payload.get("survey"), "调研", required=False),
+            },
         )
         with self._write_lock:
             append_event(self.runs_path, event)
@@ -721,7 +1123,7 @@ class GuiService:
     def discard_idea(self, payload: dict) -> dict:
         idea_id = _text(payload.get("idea"), "想法")
         reason = _text(payload.get("reason"), "放弃原因", required=False)
-        _, _, batches, _, _, ideas, _ = self._load()
+        _, _, batches, _, _, ideas, _, _ = self._load()
         idea = ideas.get(idea_id)
         if idea is None:
             raise GuiInputError(f"找不到想法 {idea_id}", 404)
@@ -752,7 +1154,7 @@ class GuiService:
     def create_draft(self, payload: dict) -> dict:
         title = _text(payload.get("title"), "论文标题")
         venue = _text(payload.get("venue"), "目标期刊或会议", required=False)
-        _, _, _, _, _, _, drafts = self._load()
+        _, _, _, _, _, _, drafts, _ = self._load()
         draft_id = next_draft_id(drafts)
         event = Event(
             ts=_now(),
@@ -771,7 +1173,7 @@ class GuiService:
         draft_id = _text(payload.get("draft"), "草稿")
         section = _text(payload.get("section"), "章节")
         text = _text(payload.get("text"), "章节内容", required=False)
-        _, _, batches, _, ledger, ideas, drafts = self._load()
+        _, _, batches, _, ledger, ideas, drafts, _ = self._load()
         draft = drafts.get(draft_id)
         if draft is None:
             raise GuiInputError(f"找不到草稿 {draft_id}", 404)
@@ -795,7 +1197,7 @@ class GuiService:
     def set_draft_status(self, payload: dict) -> dict:
         draft_id = _text(payload.get("draft"), "草稿")
         status = _text(payload.get("status"), "草稿状态")
-        _, _, _, _, _, _, drafts = self._load()
+        _, _, _, _, _, _, drafts, _ = self._load()
         draft = drafts.get(draft_id)
         if draft is None:
             raise GuiInputError(f"找不到草稿 {draft_id}", 404)
@@ -814,7 +1216,7 @@ class GuiService:
 
     def export_draft(self, payload: dict) -> dict:
         draft_id = _text(payload.get("draft"), "草稿")
-        _, _, _, _, _, _, drafts = self._load()
+        _, _, _, _, _, _, drafts, _ = self._load()
         draft = drafts.get(draft_id)
         if draft is None:
             raise GuiInputError(f"找不到草稿 {draft_id}", 404)
@@ -1097,6 +1499,17 @@ _POST_ROUTES = {
     "/api/batches": "create_batch",
     "/api/batches/meta": "revise_batch_meta",
     "/api/predictions": "lock_predictions",
+    "/api/surveys": "create_survey",
+    "/api/surveys/run": "run_survey",
+    "/api/surveys/read": "read_paper",
+    "/api/surveys/skip": "skip_paper",
+    "/api/surveys/tier": "retier_paper",
+    "/api/surveys/bottleneck": "set_bottleneck",
+    "/api/surveys/bottleneck/ai": "ask_bottleneck",
+    "/api/surveys/idea": "survey_to_idea",
+    "/api/surveys/close": "close_survey",
+    "/api/surveys/summarize": "summarize_papers",
+    "/api/surveys/query": "suggest_query",
     "/api/advice": "ask_advice",
     "/api/probe": "ask_probe",
     "/api/results": "add_results",

@@ -13,6 +13,7 @@
         <a class="brand" href="#/"><i aria-hidden="true">§</i>Ariadne</a>
         <nav class="tabs" id="tabs" aria-label="主导航">
           <a class="tab" href="#/" data-tab="today">今天<b class="quiet" id="n-todo" hidden>0</b></a>
+          <a class="tab" href="#/surveys" data-tab="surveys">调研<b class="quiet" id="n-surveys" hidden>0</b></a>
           <a class="tab" href="#/batches" data-tab="batches">批次<b class="quiet" id="n-batches" hidden>0</b></a>
           <a class="tab" href="#/ledger" data-tab="ledger">账本<b class="quiet" id="n-ledger" hidden>0</b></a>
           <a class="tab" href="#/paper" data-tab="paper">论文<b class="quiet" id="n-paper" hidden>0</b></a>
@@ -35,6 +36,14 @@
         <p class="page-sub" id="today-sub"></p>
         <div id="today-body"></div>
       </section>
+
+      <section id="view-surveys" class="view">
+        <h1 class="page">调研</h1>
+        <p class="page-sub">进新领域时先搞清楚地基是什么。里程碑由引用图算出来，不是问 AI 要的——每一条都能点开核实。</p>
+        <div id="surveys-body"></div>
+      </section>
+
+      <section id="view-survey" class="view"><div id="survey-body"></div></section>
 
       <section id="view-batches" class="view">
         <h1 class="page">批次</h1>

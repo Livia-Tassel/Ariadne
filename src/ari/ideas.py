@@ -46,6 +46,7 @@ class Idea:
     id: str
     text: str
     motivation: str = ""
+    survey: str = ""
     added_ts: str = ""
     batches: list[str] = field(default_factory=list)
     discarded: bool = False
@@ -92,6 +93,7 @@ def project_ideas(events) -> tuple[dict[str, Idea], list[str]]:
                 id=idea_id,
                 text=text,
                 motivation=(event.payload.get("motivation") or "").strip(),
+                survey=(event.payload.get("survey") or "").strip(),
                 added_ts=event.ts,
             )
 

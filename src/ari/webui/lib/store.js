@@ -52,6 +52,10 @@ export function todos() {
       }
     }
   }
+  // 调研的待办排在意外之后：意外会随时间衰减，论文不会。
+  for (const todo of s.survey_todos || []) {
+    items.push({ ...todo, survey: todo.survey, act: todo.kind === "待精读" ? "去读" : "写瓶颈" });
+  }
   for (const batch of s.batches) {
     for (const run of batch.runs) {
       if (run.verdict === "NOISY") {

@@ -833,3 +833,163 @@ def test_saving_a_paper_section_does_not_create_a_batch_warning(tmp_path):
     )
 
     assert service.state()["warnings"] == []
+
+
+# ---------- 领域调研 ----------
+#
+# 与 AI 层同构：抓不到就降级，不报错不阻断。测试全部替换掉碰网络的那两个
+# 函数——网络收窄在 openalex.fetch_json 一处，这里不该碰它。
+
+from ari.openalex import Budget, OpenAlexUnavailable, Paper  # noqa: E402
+
+_BUDGET = Budget(limit=1000, remaining=980, reset_seconds=71829)
+
+
+def _paper(work, refs=(), year=2024, cited=10, title=None):
+    return Paper(
+        work=work,
+        title=title or f"论文 {work}",
+        year=year,
+        authors=["某人"],
+        venue="某会议",
+        cited_by=cited,
+        abstract=f"{work} 的摘要",
+        referenced=list(refs),
+    )
+
+
+def _fake_openalex(monkeypatch, seed, milestones):
+    monkeypatch.setattr(web, "openalex_search", lambda *a, **k: (seed, _BUDGET))
+    monkeypatch.setattr(web, "fetch_by_ids", lambda works, **k: (milestones, _BUDGET))
+
+
+def _survey(service, monkeypatch, **overrides):
+    """开一个调研并抓一次。种子集 4 篇全都引用 FOUNDATION。"""
+    payload = {"topic": "小数据集上的正则化", "query": "dropout small data", "from_year": 2022}
+    payload.update(overrides)
+    created = service.create_survey(payload)
+    seed = [_paper(f"S{i}", refs=["FOUNDATION", f"X{i}"]) for i in range(4)]
+    _fake_openalex(monkeypatch, seed, [_paper("FOUNDATION", year=2014, cited=34236,
+                                              title="Dropout: a simple way…")])
+    service.run_survey({"survey": created["survey"]})
+    return created["survey"]
+
+
+def test_survey_opens_and_records_the_query(tmp_path):
+    """检索式存档：半年后你想知道当初到底搜了什么，答案得在账本里。"""
+    service = GuiService(tmp_path / "p")
+
+    created = service.create_survey({"topic": "小数据集上的正则化", "query": "dropout small data"})
+
+    assert created == {"ok": True, "survey": "s1"}
+    survey = service.state()["surveys"][0]
+    assert survey["query"] == "dropout small data"
+    assert survey["topic"] == "小数据集上的正则化"
+
+
+def test_running_a_survey_tiers_by_citation_graph(tmp_path, monkeypatch):
+    """里程碑是算出来的：4 篇种子全引了 FOUNDATION，阈值 3，它过线。"""
+    service = GuiService(tmp_path / "p")
+    _survey(service, monkeypatch)
+
+    survey = service.state()["surveys"][0]
+    milestones = {p["work"]: p for p in survey["milestones"]}
+    assert list(milestones) == ["FOUNDATION"]
+    assert milestones["FOUNDATION"]["in_set"] == 4
+    assert len(survey["followups"]) == 4
+
+
+def test_running_a_survey_twice_does_not_duplicate_papers(tmp_path, monkeypatch):
+    """再抓一次是「补充」，不是「重来」。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+    before = len([e for e in service._load()[0] if e.type == "paper_found"])
+
+    service.run_survey({"survey": sid})
+
+    assert len([e for e in service._load()[0] if e.type == "paper_found"]) == before
+
+
+def test_survey_degrades_quietly_when_openalex_is_unreachable(tmp_path, monkeypatch):
+    """断网不报错、不阻断——与 LLM 层同一条约定。"""
+    service = GuiService(tmp_path / "p")
+    created = service.create_survey({"topic": "x", "query": "y"})
+
+    def refuse(*a, **k):
+        raise OpenAlexUnavailable("连不上 OpenAlex：Network is unreachable")
+
+    monkeypatch.setattr(web, "openalex_search", refuse)
+    result = service.run_survey({"survey": created["survey"]})
+
+    assert result["ok"] is True and result["available"] is False
+    assert "连不上" in result["reason"]
+    assert not [e for e in service._load()[0] if e.type == "paper_found"]
+
+
+def test_reading_a_paper_requires_writing_down_what_you_took(tmp_path, monkeypatch):
+    """和预测必填理由是同一个道理：不写下来，等于没读。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+
+    with pytest.raises(GuiInputError, match="收获"):
+        service.read_paper({"survey": sid, "work": "FOUNDATION", "takeaway": "  "})
+
+    service.read_paper({"survey": sid, "work": "FOUNDATION", "takeaway": "模型平均，不是噪声注入"})
+    survey = service.state()["surveys"][0]
+    assert survey["milestones"][0]["read"] is True
+    assert survey["milestones"][0]["takeaway"] == "模型平均，不是噪声注入"
+
+
+def test_paper_can_be_retiered_by_hand(tmp_path, monkeypatch):
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+
+    service.retier_paper({"survey": sid, "work": "S0", "tier": "milestone"})
+
+    survey = service.state()["surveys"][0]
+    assert {p["work"] for p in survey["milestones"]} == {"FOUNDATION", "S0"}
+
+
+def test_bottleneck_must_be_written_before_asking_ai(tmp_path, monkeypatch):
+    """与预测层同一条锚定规则：先看 AI 的判断，你的分析就失去独立性了。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+
+    monkeypatch.setattr(web, "reason_bottleneck", lambda *a: pytest.fail("写之前不该调用"))
+    with pytest.raises(GuiInputError, match="先写下"):
+        service.ask_bottleneck({"survey": sid})
+
+
+def test_bottleneck_becomes_an_idea(tmp_path, monkeypatch):
+    """调研以一句瓶颈陈述结束，一键立为想法——管线因此是连的。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+    service.set_bottleneck({"survey": sid, "text": "没人分开量过容量与正则各自的贡献"})
+
+    created = service.survey_to_idea({"survey": sid})
+
+    idea = next(i for i in service.state()["ideas"] if i["id"] == created["idea"])
+    assert idea["text"] == "没人分开量过容量与正则各自的贡献"
+    assert idea["survey"] == sid
+
+
+def test_survey_cannot_close_without_a_bottleneck(tmp_path, monkeypatch):
+    """不落到那句话上，前面读的全白读。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+
+    with pytest.raises(GuiInputError, match="瓶颈"):
+        service.close_survey({"survey": sid})
+
+    service.set_bottleneck({"survey": sid, "text": "卡在没有可控的容量-正则解耦实验"})
+    service.close_survey({"survey": sid})
+    assert service.state()["surveys"][0]["closed"] is True
+
+
+def test_today_surfaces_unread_milestones(tmp_path, monkeypatch):
+    """首屏要说「该精读什么」，否则调研页开了也没人回去。"""
+    service = GuiService(tmp_path / "p")
+    _survey(service, monkeypatch)
+
+    kinds = {row["kind"] for row in service.state()["survey_todos"]}
+    assert "待精读" in kinds

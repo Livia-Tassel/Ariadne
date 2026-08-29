@@ -8,6 +8,7 @@ import { hitRate, refresh, store, subscribe, todos } from "./lib/store.js";
 import { initPalette, initTheme } from "./parts/shell.js";
 import { renderToday } from "./views/today.js";
 import { renderBatches } from "./views/batches.js";
+import { renderSurvey, renderSurveys } from "./views/survey.js";
 import { renderBatch } from "./views/batch.js";
 import { renderPlan } from "./views/plan.js";
 import { renderLedger } from "./views/ledger.js";
@@ -24,6 +25,8 @@ function parseHash() {
 
   if (!parts.length) return { view: "today", params };
   if (parts[0] === "batches") return { view: "batches", params };
+  if (parts[0] === "surveys") return { view: "surveys", params };
+  if (parts[0] === "survey" && parts[1]) return { view: "survey", survey: parts[1], params };
   if (parts[0] === "new") return { view: "new", params };
   if (parts[0] === "ledger") return { view: "ledger", params };
   if (parts[0] === "paper") return { view: parts[1] ? "draft" : "paper", draft: parts[1], params };
@@ -38,11 +41,13 @@ function parseHash() {
   return { view: "today", params };
 }
 
-const TAB_OF = { batch: "batches", new: "batches", draft: "paper" };
+const TAB_OF = { batch: "batches", new: "batches", draft: "paper", survey: "surveys" };
 
 const RENDER = {
   today: renderToday,
   batches: renderBatches,
+  surveys: renderSurveys,
+  survey: renderSurvey,
   batch: renderBatch,
   new: renderPlan,
   ledger: renderLedger,
@@ -85,6 +90,7 @@ function drawDocLine() {
     node.className = hot ? "" : "quiet";
   };
   count("#n-todo", pending, true);
+  count("#n-surveys", s.summary.surveys);
   count("#n-batches", s.summary.batches);
   count("#n-ledger", s.summary.open_ideas + s.beliefs.length);
   count("#n-paper", s.summary.drafts);

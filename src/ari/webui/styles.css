@@ -684,3 +684,31 @@ table.ledger td input { padding: 4px 7px; font-size: 13.5px; }
 /* 与实测排序不一致的位次——分歧本身就是有信息量的信号。 */
 .advice .rank li.off { color: var(--signal); font-weight: 600; }
 .advice .quote { margin-bottom: 6px; }
+
+/* ---------- 调研 ---------- */
+
+.entry.paper { grid-template-columns: 74px minmax(0, 1fr) 62px; align-items: baseline; }
+.entry.paper .eid { font-size: 12px; }
+.entry.paper .txt b { font-weight: 600; }
+.entry.paper .txt small { color: var(--ink-3); }
+.entry.paper.done { color: var(--ink-2); }
+/* 「我拿走的」与「AI 摘要」在视觉上必须一眼分开——前者是你读的，后者不是。 */
+.entry .took {
+  display: block; margin-top: 6px; padding-left: 11px;
+  border-left: 2px solid var(--ink);
+  font-size: 13.5px; color: var(--ink);
+}
+.entry .changed {
+  display: block; margin-top: 5px; padding-left: 11px;
+  border-left: 1px dashed var(--rule);
+  font-size: 13px; color: var(--ink-2);
+}
+.entry small.worth { color: var(--signal); }
+.entry.paper .read-form { margin-top: 4px; }
+.entry.paper .read-form .field { max-width: 46em; }
+.tail-toggle {
+  display: block; width: 100%; padding: 10px 0;
+  border-bottom: 1px solid var(--rule-2);
+  color: var(--ink-3); font-size: 13px; text-align: left; padding-left: 10px;
+}
+.tail-toggle:hover { color: var(--signal); background: var(--paper-2); }

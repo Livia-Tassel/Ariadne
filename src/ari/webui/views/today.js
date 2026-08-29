@@ -38,6 +38,20 @@ function movement(run, batch) {
 function rowHtml(item) {
   const { kind, batch, run, act, hot, count } = item;
 
+  // 调研待办：没有 batch，指向调研页
+  if (item.survey) {
+    return html`<a class="todo-row" href="#/survey/${encodeURIComponent(item.survey)}">
+      <span class="todo-kind">${kind}</span>
+      <span class="todo-where">${item.survey}</span>
+      <span class="todo-what">
+        ${kind === "待精读"
+          ? html`<small>${item.in_set} 篇近期工作引了它 · ${item.title}</small>`
+          : html`<small>里程碑都读完了 —— ${item.topic}</small>`}
+      </span>
+      <span class="todo-go">${act} →</span>
+    </a>`;
+  }
+
   if (!run) {
     const what =
       kind === "等结果"
@@ -135,13 +149,17 @@ function calibrationHtml() {
 
 function blankProject() {
   return html`<div class="blank">
-    <h3>先写下你以为会发生什么。</h3>
+    <h3>从哪开始，取决于你现在在哪。</h3>
     <p>
-      开一个批次只要三样：一句能被这批实验检验的假设、要变的变量、要看的指标。
-      预测可以等到某个 run 真要开跑之前再锁——但必须先于它的结果。
+      <b>进了一个新领域</b>——先花十分钟搞清楚它的地基是什么。系统按引用图算出该你亲自读的
+      那十来篇，其余交给 AI 摘要，读完落到一句「这个领域卡在哪」。
     </p>
-    <a class="btn" href="#/new">开第一个批次</a>
-    <a class="link side" href="#/ledger">还只是个念头，先记进账本</a>
+    <p>
+      <b>已经有想法了</b>——直接开批次。只要三样：一句能被检验的假设、要变的变量、要看的指标。
+      预测可以等到某个 run 真要开跑之前再锁，但必须先于它的结果。
+    </p>
+    <a class="btn" href="#/surveys">开一个调研</a>
+    <a class="link side" href="#/new">已经知道要做什么，直接开批次</a>
   </div>`;
 }
 
@@ -159,7 +177,9 @@ export function renderToday() {
     ...s.warnings,
   ];
 
-  if (!s.batches.length) {
+  // 只有真的什么都没有时才显示空状态。调研在管线最前面，那一段是没有
+  // 批次的——只看 batches.length 会把「正在调研」误判成「空项目」。
+  if (!s.batches.length && !items.length && !s.surveys.length) {
     $("#today-body").innerHTML = blankProject();
     return;
   }
