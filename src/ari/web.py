@@ -102,7 +102,14 @@ class GuiService:
             raise GuiInputError(f"一次最多创建 {self.MAX_RUNS} 个 run，当前是 {len(runs)} 个")
 
         metric_names, metric_specs = self._metrics(payload.get("metrics"))
-        predictions = self._predictions(payload.get("predictions"), runs, metric_names)
+        # 预测可选：最小可提交的批次是「假设 + 变量 + 指标」。旧版把 N×M 个
+        # 预测格堆在跑任何实验之前，第一次用的人在那里就走了。
+        raw_predictions = payload.get("predictions")
+        predictions = (
+            self._predictions(raw_predictions, runs, metric_names)
+            if raw_predictions
+            else {}
+        )
         result_path = self._result_path(payload.get("result_path"))
         expected_ranking = self._expected_ranking(
             payload.get("expected_ranking"), runs, metric_names
@@ -201,6 +208,46 @@ class GuiService:
             raise GuiInputError("预期排序里有重复的 run")
         return {"metric": metric, "order": list(order)}
 
+    def lock_predictions(self, payload: dict) -> dict:
+        """为若干 run 锁定预测。
+
+        渐进锁定：不必一次锁完整批。约束只有一条，而且是逐 run 的——某个
+        run 的预测必须先于它的结果。真锁晚了也不拒绝，投影层会永久记下
+        prediction_after_result，见 spec §4.2。
+        """
+        batch_id = _text(payload.get("batch"), "批次")
+        _, _, batches, _, _, _, _ = self._load()
+        batch = batches.get(batch_id)
+        if batch is None:
+            raise GuiInputError(f"找不到批次 {batch_id}", 404)
+        if batch.closed:
+            raise GuiInputError(f"批次 {batch_id} 已收口，不再接受新预测")
+
+        all_runs = expand_runs(batch.dimensions)
+        metric_names = self._batch_metric_names(batch) or list(batch.metric_specs)
+        if not metric_names:
+            raise GuiInputError(f"批次 {batch_id} 没有声明任何指标")
+
+        predictions = self._predictions(
+            payload.get("predictions"), all_runs, metric_names, complete=False
+        )
+        for run in predictions:
+            existing = batch.runs.get(run)
+            if existing is not None and existing.prediction is not None:
+                raise GuiInputError(
+                    f"{run} 的预测已经锁定过了。预测不会被覆盖——"
+                    f"要改请走修订，原值会保留下来"
+                )
+
+        now = _now()
+        with self._write_lock:
+            for run, body in predictions.items():
+                append_event(
+                    self.runs_path,
+                    Event(ts=now, type="prediction", batch=batch_id, run=run, payload=body),
+                )
+        return {"ok": True, "batch": batch_id, "locked": len(predictions)}
+
     def discover_results(self, payload: dict) -> dict:
         """按 result_path 模板扫出结果文件并解析，**不写盘**。
 
@@ -270,9 +317,13 @@ class GuiService:
         batch = batches.get(batch_id)
         if batch is None:
             raise GuiInputError(f"找不到批次 {batch_id}", 404)
-        metric_names = self._batch_metric_names(batch)
+        metric_names = self._batch_metric_names(batch) or list(batch.metric_specs)
         if not metric_names:
             raise GuiInputError(f"批次 {batch_id} 没有指标")
+        # 渐进锁定下「还没锁预测」是常态，所以 run 的合法性对着变量组合校验，
+        # 而不是对着已有事件。预测缺席不拒绝写入——事件流是只追加的唯一真相，
+        # 拒绝记录一次真实测量比记下它更糟；投影层会把这个 run 标成无法判定。
+        known_runs = set(expand_runs(batch.dimensions)) | set(batch.runs)
 
         new_events: list[Event] = []
         seen: set[tuple[str, int]] = set()
@@ -280,12 +331,15 @@ class GuiService:
             if not isinstance(row, dict):
                 raise GuiInputError(f"第 {index} 条结果格式不正确")
             run_key = _text(row.get("run"), f"第 {index} 条结果的 run")
-            run = batch.runs.get(run_key)
-            if run is None or run.prediction is None:
+            if run_key not in known_runs:
                 raise GuiInputError(f"{run_key} 不属于批次 {batch_id}")
+            run = batch.runs.get(run_key)
             seed = self._seed(row.get("seed"), index)
             key = (run_key, seed)
-            if key in seen or any(seed in samples for samples in run.samples.values()):
+            existing_seeds = (
+                any(seed in samples for samples in run.samples.values()) if run else False
+            )
+            if key in seen or existing_seeds:
                 raise GuiInputError(
                     f"{run_key} 的 seed={seed} 已经存在。为避免无提示覆盖，请换一个 seed"
                 )
@@ -689,16 +743,22 @@ class GuiService:
         return names, specs
 
     @staticmethod
-    def _predictions(raw, runs: list[str], metrics: list[str]) -> dict[str, dict]:
+    def _predictions(raw, runs: list[str], metrics: list[str], *, complete: bool = True) -> dict[str, dict]:
+        """校验一批预测。
+
+        complete=False 时允许只覆盖部分 run——渐进锁定下预测是逐个落盘的。
+        约束是「某个 run 的预测必须先于它的结果」，这是逐 run 的，不需要
+        一次锁完整批。
+        """
         if not isinstance(raw, list) or not raw:
-            raise GuiInputError("请先生成并填写预测表")
+            raise GuiInputError("请先填写预测")
         by_run: dict[str, dict] = {}
         for index, row in enumerate(raw, start=1):
             if not isinstance(row, dict):
                 raise GuiInputError(f"第 {index} 条预测格式不正确")
             run = _text(row.get("run"), f"第 {index} 条预测的 run")
             if run not in runs:
-                raise GuiInputError(f"预测表里的 {run} 不属于当前变量组合")
+                raise GuiInputError(f"{run} 不属于当前变量组合")
             if run in by_run:
                 raise GuiInputError(f"run {run} 在预测表中重复")
             raw_metrics = row.get("metrics")
@@ -726,7 +786,7 @@ class GuiService:
                 "rationale": rationale,
             }
         missing = [run for run in runs if run not in by_run]
-        if missing:
+        if complete and missing:
             raise GuiInputError(f"还有 {len(missing)} 个 run 没有预测")
         return by_run
 
@@ -830,6 +890,14 @@ class GuiService:
             "dimensions": batch.dimensions,
             "metrics": metric_names,
             "metric_specs": batch.metric_specs,
+            # 变量组合展开后的 run 总数。runs 只含有事件的 run，unlocked 只含
+            # 没预测的——一个有结果但没锁预测的 run 会同时出现在两边，相加会重。
+            "run_count": len(expand_runs(batch.dimensions)),
+            "unlocked": [
+                run
+                for run in expand_runs(batch.dimensions)
+                if (batch.runs.get(run) is None or batch.runs[run].prediction is None)
+            ],
             "result_path": batch.result_path,
             "opened_at": batch.opened_ts,
             "closed": batch.closed,
@@ -846,6 +914,7 @@ _POST_ROUTES = {
     "/api/runs/preview": "preview_runs",
     "/api/batches": "create_batch",
     "/api/batches/meta": "revise_batch_meta",
+    "/api/predictions": "lock_predictions",
     "/api/results": "add_results",
     "/api/results/discover": "discover_results",
     "/api/reviews": "add_review",

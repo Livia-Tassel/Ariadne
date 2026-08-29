@@ -113,14 +113,17 @@ export function renderPlan() {
       </div>
 
       <div class="err" id="plan-err" hidden></div>
-      <div class="acts"><button type="button" class="btn" id="to-predictions">生成预测表 →</button></div>
+      <div class="acts">
+        <button type="button" class="btn ghost" id="open-bare">先开批次，预测稍后锁</button>
+        <button type="button" class="btn" id="to-predictions">现在就填预测表 →</button>
+      </div>
 
       <div id="predict-block" hidden>
         <div class="block">
           <h3>锁定你的预测</h3>
           <p>
             可以是点值（0.83）或区间（0.80 ~ 0.84）。理由必填——它决定复盘时能否找到真正出错的那个假设。
-            保存后不会被覆盖：后续修订保留原值。
+            保存后不会被覆盖：后续修订保留原值。留空的行会跳过，之后在批次页逐个锁也行。
           </p>
           <table class="ledger">
             <thead id="p-head"></thead>
@@ -159,35 +162,58 @@ function bindPlan() {
     }
   };
 
+  // 先开批次、预测稍后锁。约束是逐 run 的，不必在跑任何实验之前填完 N×M 格。
+  $("#open-bare").onclick = async () => {
+    errorNode.hidden = true;
+    try {
+      if (!$("#p-dir").value.trim() || !$("#p-hyp").value.trim()) {
+        throw new Error("请先填写研究方向和实验假设");
+      }
+      await submitBatch(parseMetrics($("#p-metrics").value), []);
+    } catch (error) {
+      showError(errorNode, error);
+    }
+  };
+
+  async function submitBatch(metrics, predictions) {
+    const result = await post("/api/batches", {
+      research_direction: $("#p-dir").value,
+      hypothesis: $("#p-hyp").value,
+      dimensions: parseDimensions($("#p-dims").value),
+      metrics,
+      result_path: $("#p-path").value,
+      predictions,
+      idea: store.plan.idea || "",
+    });
+    toast(
+      predictions.length
+        ? `批次 ${result.batch} 已开，${predictions.length} 条预测已锁定`
+        : `批次 ${result.batch} 已开，${result.run_count} 个 run 待锁预测`,
+    );
+    store.plan = { runs: [], metrics: [], idea: "" };
+    await refresh();
+    location.hash = `#/batch/${encodeURIComponent(result.batch)}`;
+  }
+
   $("#plan-form").onsubmit = async (event) => {
     event.preventDefault();
     if (!store.plan.runs.length) return;
     const form = $("#plan-form");
-    const predictions = [...document.querySelectorAll("#p-body tr")].map((row) => ({
-      run: row.dataset.run,
-      metrics: Object.fromEntries(
-        [...row.querySelectorAll(".pv")].map((input) => [input.dataset.metric, input.value.trim()]),
-      ),
-      confidence: row.querySelector(".pc").value,
-      rationale: row.querySelector(".pr").value.trim(),
-    }));
-
-    const ok = await submitting(form, async () => {
-      const result = await post("/api/batches", {
-        research_direction: $("#p-dir").value,
-        hypothesis: $("#p-hyp").value,
-        dimensions: parseDimensions($("#p-dims").value),
-        metrics: store.plan.metrics,
-        result_path: $("#p-path").value,
-        predictions,
-        idea: store.plan.idea || "",
+    const predictions = [];
+    for (const row of document.querySelectorAll("#p-body tr")) {
+      const values = [...row.querySelectorAll(".pv")];
+      if (values.every((input) => !input.value.trim())) continue; // 留空 = 之后再锁
+      predictions.push({
+        run: row.dataset.run,
+        metrics: Object.fromEntries(
+          values.map((input) => [input.dataset.metric, input.value.trim()]),
+        ),
+        confidence: row.querySelector(".pc").value,
+        rationale: row.querySelector(".pr").value.trim(),
       });
-      toast(`批次 ${result.batch} 已开，${result.run_count} 条预测已锁定`);
-      store.plan = { runs: [], metrics: [], idea: "" };
-      await refresh();
-      location.hash = `#/batch/${encodeURIComponent(result.batch)}`;
-    });
-    if (!ok) return;
+    }
+
+    await submitting(form, () => submitBatch(store.plan.metrics, predictions));
   };
 }
 

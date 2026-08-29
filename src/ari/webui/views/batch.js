@@ -21,6 +21,7 @@ import { findBatch, store } from "../lib/store.js";
 import { chartsHtml } from "../parts/chart.js";
 import { bindForms, closeHtml, resultFormHtml, reviewFormHtml } from "../parts/forms.js";
 import { bindResults, resultsSectionHtml } from "../parts/results.js";
+import { bindLock, lockSectionHtml } from "../parts/predict.js";
 
 /** 一句话说清这一批发生了什么。计数器说不出「假设被推翻了」。 */
 function ledeHtml(batch) {
@@ -36,8 +37,14 @@ function ledeHtml(batch) {
   }
   if (!judged.length) {
     const locked = runs.filter((run) => run.prediction).length;
+    const total = locked + (batch.unlocked?.length || 0);
+    if (!locked) {
+      return html`<p class="lede">
+        批次已开，<b>还没有锁定任何预测</b>。某个 run 开跑之前锁上它就行——不必一次锁完。
+      </p>`;
+    }
     return html`<p class="lede">
-      ${locked} 个 run 已锁定预测，还没有可判定的结果。跑完回来录入，判定会自动更新。
+      ${locked}/${total} 个 run 已锁定预测，还没有可判定的结果。跑完回来录入，判定会自动更新。
     </p>`;
   }
   if (!surprises.length) {
@@ -213,7 +220,7 @@ export function renderBatch() {
     <a class="crumb" href="#/batches">← 批次</a>
     <div class="batch-doc">
       <p class="no">
-        <span>批次 ${batch.id} · RUNS ${runs.length} · ${batch.closed ? "已收口" : "进行中"}</span>
+        <span>批次 ${batch.id} · RUNS ${batch.run_count ?? runs.length} · ${batch.closed ? "已收口" : "进行中"}</span>
         <span class="when">${dateLabel(batch.opened_at)}</span>
       </p>
       <h2>${batch.hypothesis}</h2>
@@ -224,7 +231,7 @@ export function renderBatch() {
     ${facts.length ? html`<p class="facts">${facts}</p>` : ""}
     <p class="tally-line">
       <span>命中 <b>${hit}/${judged || 0}</b></span>
-      <span>有结果 <b>${withResults}/${runs.length}</b></span>
+      <span>有结果 <b>${withResults}/${batch.run_count ?? runs.length}</b></span>
       <span class="${pending ? "hot" : ""}">待复盘 <b>${pending}</b></span>
     </p>
     ${ranking}
@@ -244,6 +251,7 @@ export function renderBatch() {
       </tbody>
     </table>
 
+    ${lockSectionHtml(batch)}
     ${resultsSectionHtml(batch)}
     ${closeHtml(batch)}
   `;
@@ -260,6 +268,7 @@ export function renderBatch() {
   }
   bindForms(batch.id);
   bindResults(batch);
+  bindLock(batch);
 
   if (store.scrollTo) {
     const row = $(`#runs-body tr.expandable[data-run="${CSS.escape(store.scrollTo)}"]`);

@@ -485,3 +485,147 @@ def test_discovered_results_keep_the_integrity_check_alive(tmp_path):
 
     run = next(r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=base")
     assert "result_predates_prediction" in run["integrity"]
+
+
+def _bare_batch(service):
+    """最小可提交的批次：假设 + 变量 + 指标，不含任何预测。"""
+    payload = _batch_payload()
+    payload.pop("predictions")
+    return service.create_batch(payload)
+
+
+def test_batch_can_open_without_any_prediction(tmp_path):
+    """渐进锁定：约束是逐 run 的——某个 run 的预测先于它的结果就够了，
+    不需要一次锁完整批。旧版把 24 个输入框堆在跑任何实验之前。"""
+    service = GuiService(tmp_path / "p")
+
+    assert _bare_batch(service) == {"ok": True, "batch": "b1", "run_count": 2}
+
+    batch = service.state()["batches"][0]
+    assert batch["runs"] == []
+    assert batch["unlocked"] == ["model=base", "model=large"]
+
+
+def test_predictions_are_locked_one_run_at_a_time(tmp_path):
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+
+    service.lock_predictions(
+        {
+            "batch": "b1",
+            "predictions": [
+                {
+                    "run": "model=base",
+                    "metrics": {"top1_acc": "0.80 ~ 0.82"},
+                    "confidence": "high",
+                    "rationale": "稳定基线",
+                }
+            ],
+        }
+    )
+
+    batch = service.state()["batches"][0]
+    assert [run["run"] for run in batch["runs"]] == ["model=base"]
+    assert batch["unlocked"] == ["model=large"]
+    assert batch["runs"][0]["prediction"]["metrics"]["top1_acc"] == [0.8, 0.82]
+
+
+def test_locking_a_run_twice_is_refused_visibly(tmp_path):
+    """投影层对重复 prediction 只往 run.warnings 里塞一句，界面看不见。
+    接口必须自己拦住并说清楚。"""
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+
+    with pytest.raises(GuiInputError, match="已经锁定"):
+        service.lock_predictions(
+            {
+                "batch": "b1",
+                "predictions": [
+                    {
+                        "run": "model=base",
+                        "metrics": {"top1_acc": "0.9"},
+                        "rationale": "想改一下",
+                    }
+                ],
+            }
+        )
+
+
+def test_locking_a_run_outside_the_batch_is_refused(tmp_path):
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+
+    with pytest.raises(GuiInputError, match="不属于"):
+        service.lock_predictions(
+            {
+                "batch": "b1",
+                "predictions": [
+                    {"run": "model=xlarge", "metrics": {"top1_acc": "0.9"}, "rationale": "手滑"}
+                ],
+            }
+        )
+
+
+def test_results_are_accepted_for_a_run_with_no_prediction(tmp_path):
+    """永不拒绝真实测量。
+
+    事件流是只追加的唯一真相，拒绝写入一次真实的实验结果比记录下它更糟。
+    但这个 run 无法判定，而且必须在界面上响。
+    """
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+
+    service.add_results(
+        {"batch": "b1", "rows": [{"run": "model=base", "seed": 0, "metrics": {"top1_acc": 0.81}}]}
+    )
+
+    run = next(r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=base")
+    assert run["verdict"] == "UNVERIFIED"
+    assert "result_without_prediction" in run["integrity"]
+
+
+def test_a_prediction_locked_after_the_result_carries_the_mark_forever(tmp_path):
+    """不阻止你事后补预测，但那条记录会一直带着这个标记。"""
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+    service.add_results(
+        {"batch": "b1", "rows": [{"run": "model=base", "seed": 0, "metrics": {"top1_acc": 0.81}}]}
+    )
+
+    service.lock_predictions(
+        {
+            "batch": "b1",
+            "predictions": [
+                {"run": "model=base", "metrics": {"top1_acc": "0.81"}, "rationale": "马后炮"}
+            ],
+        }
+    )
+
+    run = next(r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=base")
+    assert "prediction_after_result" in run["integrity"]
+    assert run["verdict"] == "CONFIRMED"  # 判定照常算，标记独立存在
+
+
+def test_results_still_refuse_a_run_outside_the_batch(tmp_path):
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+
+    with pytest.raises(GuiInputError, match="不属于批次"):
+        service.add_results(
+            {"batch": "b1", "rows": [{"run": "model=xlarge", "seed": 0, "metrics": {"top1_acc": 0.8}}]}
+        )
+
+
+def test_run_count_is_not_double_counted(tmp_path):
+    """一个有结果但没锁预测的 run 会同时出现在 runs 与 unlocked 里，
+    界面上把两者相加就会多算。总数以变量组合展开为准。"""
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+    service.add_results(
+        {"batch": "b1", "rows": [{"run": "model=base", "seed": 0, "metrics": {"top1_acc": 0.81}}]}
+    )
+
+    batch = service.state()["batches"][0]
+    assert batch["run_count"] == 2
+    assert len(batch["runs"]) == 1
+    assert batch["unlocked"] == ["model=base", "model=large"]
