@@ -1173,13 +1173,15 @@ class GuiService:
         draft_id = _text(payload.get("draft"), "草稿")
         section = _text(payload.get("section"), "章节")
         text = _text(payload.get("text"), "章节内容", required=False)
-        _, _, batches, _, ledger, ideas, drafts, _ = self._load()
+        _, _, batches, _, ledger, ideas, drafts, surveys = self._load()
         draft = drafts.get(draft_id)
         if draft is None:
             raise GuiInputError(f"找不到草稿 {draft_id}", 404)
         if section not in dict(SECTIONS):
             raise GuiInputError(f"未知章节 {section}")
-        materials = self._materials(payload.get("materials"), batches, ledger, ideas)
+        materials = self._materials(
+            payload.get("materials"), batches, ledger, ideas, surveys
+        )
         event = Event(
             ts=_now(),
             type="section_saved",
@@ -1216,14 +1218,46 @@ class GuiService:
 
     def export_draft(self, payload: dict) -> dict:
         draft_id = _text(payload.get("draft"), "草稿")
-        _, _, _, _, _, _, drafts, _ = self._load()
+        _, _, _, _, _, _, drafts, surveys = self._load()
         draft = drafts.get(draft_id)
         if draft is None:
             raise GuiInputError(f"找不到草稿 {draft_id}", 404)
-        return {"ok": True, "draft": draft_id, "markdown": render_draft_markdown(draft)}
+        return {
+            "ok": True,
+            "draft": draft_id,
+            "markdown": render_draft_markdown(draft, detail=self._material_detail(surveys)),
+        }
 
     @staticmethod
-    def _materials(raw, batches, ledger, ideas) -> list[dict]:
+    def _material_detail(surveys):
+        """把素材引用展开成可直接用的段落。
+
+        引用一个调研，展开成里程碑清单与**你的**精读笔记。AI 摘要不进
+        related work——那是别人替你读的，不该出现在你署名的论文里。
+        """
+
+        def expand(material: dict) -> list[str]:
+            survey = surveys.get(material.get("survey") or "")
+            if survey is None:
+                return []
+            lines = [f"  - 检索式 `{survey.query}` · 来源 OpenAlex"]
+            if survey.bottleneck:
+                lines.append(f"  - 瓶颈：{survey.bottleneck}")
+            for paper in survey.tier(TIER_MILESTONE):
+                where = "，".join(str(x) for x in (paper.year, paper.venue) if x)
+                lines.append(
+                    f"  - {paper.title}"
+                    + (f"（{where}）" if where else "")
+                    + f" ［本领域近期工作中 {paper.in_set} 篇引用］"
+                )
+                if paper.takeaway:
+                    lines.append(f"      我的收获：{paper.takeaway}")
+            return lines
+
+        return expand
+
+    @staticmethod
+    def _materials(raw, batches, ledger, ideas, surveys=None) -> list[dict]:
         if raw in (None, ""):
             return []
         if not isinstance(raw, list):
@@ -1244,6 +1278,11 @@ class GuiService:
                 if item["idea"] not in ideas:
                     raise GuiInputError(f"素材引用了不存在的想法 {item['idea']}")
                 materials.append({"idea": str(item["idea"])})
+            elif "survey" in item:
+                # related work 的原始材料就是调研：里程碑清单加你的精读笔记。
+                if item["survey"] not in (surveys or {}):
+                    raise GuiInputError(f"素材引用了不存在的调研 {item['survey']}")
+                materials.append({"survey": str(item["survey"])})
             else:
                 raise GuiInputError(f"第 {index} 条素材引用格式不正确")
         return materials

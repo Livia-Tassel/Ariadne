@@ -121,3 +121,39 @@ def test_render_markdown_includes_sections_and_sources():
 def test_render_markdown_empty_draft():
     drafts, _ = project_drafts(_events(("draft_opened", {"draft": "p1", "title": "T"})))
     assert "还没有开始写" in render_markdown(drafts["p1"])
+
+
+def test_render_markdown_can_expand_a_material_into_detail_lines():
+    """素材引用光给一个 ID 是不够的——related work 要的是里程碑清单本身。
+
+    展开器由调用方注入：papers.py 是纯投影，不该知道调研或批次长什么样。
+    """
+    from ari.papers import Draft, Section, render_markdown
+
+    draft = Draft(id="p1", title="标题", opened_ts="2026-08-29T10:00:00+08:00")
+    draft.sections["related"] = Section(
+        name="related",
+        text="见调研。",
+        materials=[{"survey": "s1"}],
+        saved_ts="2026-08-29T11:00:00+08:00",
+    )
+
+    markdown = render_markdown(
+        draft,
+        detail=lambda m: ["  - Deep Residual Learning（2016）[19 引用]", "      我的收获：残差连接"],
+    )
+
+    assert "- 领域调研 s1" in markdown
+    assert "  - Deep Residual Learning（2016）[19 引用]" in markdown
+    assert "      我的收获：残差连接" in markdown
+
+
+def test_render_markdown_without_an_expander_still_lists_the_label():
+    from ari.papers import Draft, Section, render_markdown
+
+    draft = Draft(id="p1", title="标题", opened_ts="2026-08-29T10:00:00+08:00")
+    draft.sections["related"] = Section(
+        name="related", text="", materials=[{"survey": "s1"}], saved_ts="2026-08-29T11:00:00+08:00"
+    )
+
+    assert "- 领域调研 s1" in render_markdown(draft)

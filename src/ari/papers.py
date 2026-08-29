@@ -129,11 +129,15 @@ def project_drafts(events) -> tuple[dict[str, Draft], list[str]]:
     return drafts, warnings
 
 
-def render_markdown(draft: Draft) -> str:
+def render_markdown(draft: Draft, detail=None) -> str:
     """把草稿渲染成一份可直接交给合作者的 Markdown。
 
     素材引用渲染成脚注样式的来源清单：论文文本里最重要的是能回溯
     「这一段的证据是哪次实验」。
+
+    detail 是可选的展开器 `material -> list[str]`：光给一个 ID 不够，
+    related work 要的是里程碑清单本身。展开逻辑由调用方注入，因为本模块
+    是纯投影，不该知道调研或批次长什么样。
     """
     lines = [f"# {draft.title}", ""]
     if draft.venue:
@@ -147,6 +151,8 @@ def render_markdown(draft: Draft) -> str:
             lines += ["**素材来源**", ""]
             for material in section.materials:
                 lines += [f"- {material_label(material)}"]
+                if detail:
+                    lines += detail(material)
             lines += [""]
 
     if not draft.ordered_sections():
@@ -161,4 +167,6 @@ def material_label(material: dict) -> str:
         return f"信念 {material['belief']}"
     if "idea" in material:
         return f"想法 {material['idea']}"
+    if "survey" in material:
+        return f"领域调研 {material['survey']}"
     return "未知素材"

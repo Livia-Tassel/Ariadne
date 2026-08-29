@@ -20,6 +20,7 @@ const DRAFT_STATUS = [
 ];
 
 function materialKey(material) {
+  if (material.survey) return `survey:${material.survey}`;
   if (material.batch) return `batch:${material.batch}`;
   if (material.belief) return `belief:${material.belief}`;
   if (material.idea) return `idea:${material.idea}`;
@@ -27,6 +28,10 @@ function materialKey(material) {
 }
 
 function materialLabel(material) {
+  if (material.survey) {
+    const survey = store.state.surveys.find((item) => item.id === material.survey);
+    return `调研 ${material.survey}：${survey ? survey.topic : "（已不存在）"}`;
+  }
   if (material.batch) {
     const batch = store.state.batches.find((item) => item.id === material.batch);
     return `批次 ${material.batch}：${batch ? batch.hypothesis : "（已不存在）"}`;
@@ -57,6 +62,11 @@ function pickerHtml(section) {
     >`;
 
   return html`<div class="picker">
+    ${group(
+      "领域调研",
+      store.state.surveys.map((survey) => option(`survey:${survey.id}`, survey.id, survey.topic)),
+      "还没有调研",
+    )}
     ${group(
       "实验批次",
       store.state.batches.map((batch) => option(`batch:${batch.id}`, batch.id, batch.hypothesis)),

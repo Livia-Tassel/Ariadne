@@ -5,15 +5,18 @@
 核心闭环：
 
 ```
-plan（填预测并锁定） → result（录实测） → 自动判定 → review（复盘 SURPRISE） → board（看板）
+调研（分层阅读 → 瓶颈） → 想法 → plan（锁定预测） → result（录实测）
+  → 自动判定 → review（复盘意外） → 信念 → 论文
 ```
+
+调研那一段是可跳过的——不是每次开工都在进新领域。但它必须存在，否则「想法从哪来」这个问题系统一句话都没说。
 
 两条贯穿全局的原则：
 
 - **负结果与正结果同等重要。** 最没有价值的是没有任何起伏的实验批次。
 - **写论文所需的一切材料，在过程中自然沉淀，而不是最后回头补。**
 
-当前界面与闭环设计见 [`specs/2026-08-27-gui-v0.4-design.md`](specs/2026-08-27-gui-v0.4-design.md)，桌面壳见 [`specs/2026-08-25-desktop-v0.3-design.md`](specs/2026-08-25-desktop-v0.3-design.md)，领域规则见 [`specs/2026-08-23-experiment-loop-design.md`](specs/2026-08-23-experiment-loop-design.md)。
+领域调研见 [`specs/2026-08-29-survey-v0.5-design.md`](specs/2026-08-29-survey-v0.5-design.md)，界面与闭环见 [`specs/2026-08-27-gui-v0.4-design.md`](specs/2026-08-27-gui-v0.4-design.md)，桌面壳见 [`specs/2026-08-25-desktop-v0.3-design.md`](specs/2026-08-25-desktop-v0.3-design.md)，领域规则见 [`specs/2026-08-23-experiment-loop-design.md`](specs/2026-08-23-experiment-loop-design.md)。
 
 ## 安装
 
@@ -77,7 +80,33 @@ ari gui -p ~/exp/lr-sweep
 
 **预测可以渐进锁定。** 开一个批次只要三样：假设、变量、指标。变量用一行紧凑语法（`model=base,large; aug=none,strong`），指标只要名字——方向与容差从名字推断。预测表移到批次页，逐个 run 填、逐个锁：约束是"某个 run 的预测必须先于它的结果"，这是逐 run 的，不需要在跑任何实验之前把 N×M 个格子填完。
 
-**AI 那一层在 GUI 里也有。** 见下一节。
+**进新领域时先做一次调研。** 见下一节。
+
+**AI 那一层在 GUI 里也有。** 见后面「AI 那一层」。
+
+## 领域调研
+
+```
+今天   调研   批次   账本   论文
+```
+
+给一句话主题和一个 OpenAlex 检索式（可以让 AI 拟，你改完再存），系统抓回近几年的一批论文，然后**按引用图算出该你亲自读的那十来篇**：
+
+```
+19 引用 · 2016 · Deep Residual Learning for Image Recognition
+16 引用 · 2019 · A survey on Image Data Augmentation for Deep Learning
+ 7 引用 · 2014 · Dropout: a simple way to prevent neural networks from overfitting
+```
+
+「19 引用」是**内部被引**——这批近期工作里有 19 篇引了它。这比原始被引数好：原始被引数受领域规模影响极大，一篇平庸的综述可能比奠基工作被引更多。
+
+**里程碑不问 AI。** 理由与「AI 不给数值」同构但更严重：编造的数值跑一次实验就发现了，编造的引用会跟着你进 related work。所有条目来自 OpenAlex，每条都带 Work ID，可点开核实。分层可以人工改——算法给的是起点，不是判决。
+
+**AI 摘要不等于你读过。** 这一层真正的风险不是幻觉，是读了 40 篇摘要之后记成自己调研过。所以它是结构保证不是界面标签：你的精读笔记落 `paper_read` 事件（必填「这篇给了我什么」），AI 摘要落 `note` 事件，而所有投影都跳过 `note`——「已读」在数据层面就不可能被 AI 写入。
+
+调研以一句**瓶颈陈述**结束，一键立为想法。写完才能看 AI 的独立判断，和预测层是同一条锚定规则。草稿引用一个调研，导出时展开成里程碑清单与你的精读笔记——related work 的原始材料本来就是这些。
+
+数据源是 OpenAlex：不需要 API key，限流是信用点制（约 1000 点/20 小时，一次调研约 20 点），界面上会显示剩余额度。断网时调研页照常显示已抓到的一切，只是抓不了新的。可以在 `config.toml` 里配 `[openalex] mailto` 以进入礼貌池。
 
 ## CLI：自动化与高级入口
 

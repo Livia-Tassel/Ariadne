@@ -993,3 +993,33 @@ def test_today_surfaces_unread_milestones(tmp_path, monkeypatch):
 
     kinds = {row["kind"] for row in service.state()["survey_todos"]}
     assert "待精读" in kinds
+
+
+def test_a_draft_section_can_cite_a_survey(tmp_path, monkeypatch):
+    """related work 的原始材料就是调研——里程碑清单加你的精读笔记。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+    service.create_draft({"title": "容量与正则的解耦", "venue": "内部报告"})
+
+    service.save_section(
+        {
+            "draft": "p1",
+            "section": "related",
+            "text": "见调研。",
+            "materials": [{"survey": sid}],
+        }
+    )
+
+    draft = service.state()["drafts"][0]
+    section = next(s for s in draft["sections"] if s["name"] == "related")
+    assert section["materials"] == [{"survey": "s1"}]
+
+
+def test_citing_an_unknown_survey_is_refused(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_draft({"title": "x"})
+
+    with pytest.raises(GuiInputError, match="不存在的调研"):
+        service.save_section(
+            {"draft": "p1", "section": "related", "text": "", "materials": [{"survey": "s9"}]}
+        )
