@@ -331,3 +331,28 @@ def test_event_for_unopened_batch_is_warned():
 
     assert batches == {}
     assert any("b1" in w for w in warnings)
+
+
+def test_survey_events_do_not_disturb_the_batch_projection():
+    """调研事件跨批次存活，由 surveys.py 单独投影——批次这边只该跳过，
+    不该报「未知事件类型」，那会在界面上刷出一片假告警。"""
+    batches, warnings = project(
+        [
+            make_batch_opened(),
+            Event(
+                ts="2026-08-29T10:00:00+08:00",
+                type="survey_opened",
+                batch="s1",
+                payload={"topic": "正则化"},
+            ),
+            Event(
+                ts="2026-08-29T10:01:00+08:00",
+                type="paper_found",
+                batch="s1",
+                payload={"work": "W1"},
+            ),
+        ]
+    )
+
+    assert warnings == []
+    assert set(batches) == {"b1"}

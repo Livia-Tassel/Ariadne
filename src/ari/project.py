@@ -38,6 +38,14 @@ _KNOWN_TYPES = {
     "draft_opened",
     "section_saved",
     "draft_status_changed",
+    # 调研跨批次存活，由 surveys.py 单独投影。
+    "survey_opened",
+    "paper_found",
+    "paper_tiered",
+    "paper_read",
+    "paper_skipped",
+    "survey_bottleneck",
+    "survey_closed",
 }
 
 LOW_INFORMATION_SIGNAL = "本批次全部命中预期，未产生新信息——变量取值范围可能过于保守"
@@ -121,9 +129,11 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             or event.type.startswith("belief_")
             or event.type.startswith("idea_")
             or event.type.startswith("draft_")
+            or event.type.startswith("survey_")
+            or event.type.startswith("paper_")
             or event.type == "section_saved"
         ):
-            continue  # 信念/想法/草稿跨批次存活，由各自模块单独投影
+            continue  # 信念/想法/草稿/调研跨批次存活，由各自模块单独投影
 
         batch = batches.get(event.batch)
         if batch is None:
