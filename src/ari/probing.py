@@ -10,7 +10,12 @@ prompt 里必须塞进三样具体的东西：偏差数字、当初写下的理�
 
 from __future__ import annotations
 
-from .llm import LLMUnavailable
+from pathlib import Path
+
+from .config import load_config, resolve_role
+from .llm import LLMUnavailable, complete
+from .recall import similar
+from .reviewing import deviation_lines
 
 PROBE_SCHEMA = {
     "type": "object",
@@ -80,3 +85,28 @@ def check_probe(probe: dict) -> dict:
         raise LLMUnavailable("AI 没能提出任何具体问题")
     hypotheses = [h.strip() for h in (probe.get("hypotheses") or []) if h and h.strip()]
     return {"questions": questions, "hypotheses": hypotheses}
+
+
+def probe(root: Path, batches: dict, run) -> dict:
+    """问一次有针对性的追问。任何问题都抛 LLMUnavailable。
+
+    先检索本项目历史上相似的意外与当时写下的结论，再问具体的问题——
+    「两组的数据增强配置一样吗」，而不是「你觉得是为什么呢」。
+    """
+    ref = resolve_role(load_config(root), "reason")
+    history = similar(batches, run)
+    hypothesis = batches[run.batch].hypothesis if run.batch in batches else ""
+    result = complete(
+        ref,
+        SYSTEM,
+        build_prompt(
+            batch=run.batch,
+            run=run.run,
+            hypothesis=hypothesis,
+            deviations=deviation_lines(run),
+            rationale=(run.prediction or {}).get("rationale", ""),
+            history=history,
+        ),
+        PROBE_SCHEMA,
+    )
+    return check_probe(result)

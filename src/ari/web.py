@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .advising import advise
 from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
@@ -33,7 +34,9 @@ from .papers import (
     project_drafts,
     render_markdown as render_draft_markdown,
 )
+from .llm import LLMUnavailable
 from .planning import Design, build_events, expand_runs, next_batch_id
+from .probing import probe
 from .project import closure_blockers, project as project_events
 from .reviewing import build_reflection_events, deviation_lines, pending
 from .resources import asset_file
@@ -248,6 +251,100 @@ class GuiService:
                 )
         return {"ok": True, "batch": batch_id, "locked": len(predictions)}
 
+    # AI 调用的墙钟上限。ThreadingHTTPServer 每请求一个线程，卡住的只是这一个；
+    # 但没有上限的话，一个不响应的 endpoint 会让转圈永远转下去。
+    AI_TIMEOUT = 45
+
+    def _ai(self, work, kind: str, *, batch: str, run: str | None = None) -> dict:
+        """跑一次 AI 调用并归档。
+
+        降级不是失败：拿不到就返回 200 + available=false，界面显示一行安静的
+        说明。spec §8 要求「不报错、不阻断、不需要加任何 flag」——只有把所有
+        失败收敛成这一种，这个承诺才写得干净。
+
+        输出只以 note 事件存档，**绝不参与判定**。verdict 永远纯离线可复现。
+        """
+        box: dict = {}
+
+        def run_it():
+            try:
+                box["value"] = work()
+            except LLMUnavailable as exc:
+                box["reason"] = str(exc)
+            except Exception as exc:  # 适配器漏出来的意外，同样只降级不中断
+                traceback.print_exc()
+                box["reason"] = f"调用 AI 时出错：{type(exc).__name__}"
+
+        worker = threading.Thread(target=run_it, daemon=True)
+        worker.start()
+        worker.join(self.AI_TIMEOUT)
+        if worker.is_alive():
+            return {"ok": True, "available": False, "reason": f"AI 超过 {self.AI_TIMEOUT} 秒没有响应"}
+        if "value" not in box:
+            return {"ok": True, "available": False, "reason": box.get("reason", "这次没有 AI 那一段")}
+
+        payload = {"kind": kind, kind.removeprefix("ai_"): box["value"]}
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(ts=_now(), type="note", batch=batch, run=run, payload=payload),
+            )
+        return {"ok": True, "available": True, kind.removeprefix("ai_"): box["value"]}
+
+    def ask_advice(self, payload: dict) -> dict:
+        """锁定预测之后，给一份 AI 的独立判断。只给方向，不给数值。
+
+        调用发起在预测已经写进 runs.jsonl 之后。先看到 AI 的判断会产生锚定
+        效应，你自己的预测随之失去独立性——而独立性正是这套机制价值的来源。
+        所以不是「先算好、晚点再显示」，是那时候根本还没算��
+        """
+        batch_id = _text(payload.get("batch"), "批次")
+        _, _, batches, _, _, _, _ = self._load()
+        batch = batches.get(batch_id)
+        if batch is None:
+            raise GuiInputError(f"找不到批次 {batch_id}", 404)
+
+        locked = [run for run, state in batch.runs.items() if state.prediction is not None]
+        if not locked:
+            raise GuiInputError(
+                "先锁定至少一个 run 的预测。先看 AI 的判断会让你自己的预测失去独立性，"
+                "而独立性正是这件事的价值所在"
+            )
+
+        design = Design(
+            hypothesis=batch.hypothesis,
+            dimensions=batch.dimensions,
+            metrics=self._batch_metric_names(batch) or list(batch.metric_specs),
+            metric_specs=batch.metric_specs,
+            result_path=batch.result_path,
+            expected_ranking=batch.expected_ranking,
+            research_direction=batch.research_direction,
+        )
+        runs = sorted(locked)
+        return self._ai(
+            lambda: advise(self.root, design, runs), "ai_advice", batch=batch_id
+        )
+
+    def ask_probe(self, payload: dict) -> dict:
+        """复盘时给一条有针对性的追问。
+
+        它会检索本项目历史上相似的意外与当时写下的结论，然后问具体的问题，
+        而不是「你觉得是为什么呢」。
+        """
+        batch_id = _text(payload.get("batch"), "批次")
+        run_key = _text(payload.get("run"), "run")
+        _, _, batches, _, _, _, _ = self._load()
+        batch = batches.get(batch_id)
+        run = batch.runs.get(run_key) if batch else None
+        if run is None:
+            raise GuiInputError(f"找不到 {batch_id} 的 {run_key}", 404)
+        if run.verdict is not Verdict.SURPRISE:
+            raise GuiInputError("只有超出预期的 run 才值得追问——其余的没有要解释的东西")
+
+        return self._ai(
+            lambda: probe(self.root, batches, run), "ai_probe", batch=batch_id, run=run_key
+        )
+
     def discover_results(self, payload: dict) -> dict:
         """按 result_path 模板扫出结果文件并解析，**不写盘**。
 
@@ -452,9 +549,34 @@ class GuiService:
                 append_event(self.runs_path, event)
         return {"ok": True, "written": len(new_events)}
 
+    @staticmethod
+    def _ai_notes(events) -> dict:
+        """把归档的 AI note 折回批次上。
+
+        project() 有意跳过 note——它们不参与任何判定。但存过的判断要能再
+        看到，否则刷新一次就没了。同一批次多次问就取最后一次。
+        """
+        notes: dict[str, dict] = {}
+        for event in events:
+            if event.type != "note" or not event.batch:
+                continue
+            kind = event.payload.get("kind")
+            if kind not in ("ai_advice", "ai_probe"):
+                continue
+            slot = notes.setdefault(event.batch, {"advice": None, "probes": {}})
+            if kind == "ai_advice":
+                slot["advice"] = event.payload.get("advice")
+            elif event.run:
+                slot["probes"][event.run] = event.payload.get("probe")
+        return notes
+
     def state(self) -> dict:
-        _, parse_errors, batches, warnings, ledger, ideas, drafts = self._load()
-        serialized_batches = [self._batch_json(batch) for batch in reversed(list(batches.values()))]
+        events, parse_errors, batches, warnings, ledger, ideas, drafts = self._load()
+        notes = self._ai_notes(events)
+        serialized_batches = [
+            self._batch_json(batch, notes.get(batch.id) or {})
+            for batch in reversed(list(batches.values()))
+        ]
         pending_runs = [
             {
                 "batch": run.batch,
@@ -845,7 +967,8 @@ class GuiService:
                     names.append(name)
         return names
 
-    def _batch_json(self, batch) -> dict:
+    def _batch_json(self, batch, notes: dict | None = None) -> dict:
+        notes = notes or {}
         metric_names = self._batch_metric_names(batch)
         runs = []
         for run in batch.runs.values():
@@ -871,6 +994,7 @@ class GuiService:
                         for name, judgement in run.metric_judgements.items()
                     },
                     "reflection": run.reflection,
+                    "probe": (notes.get("probes") or {}).get(run.run),
                     "integrity": run.integrity,
                     "warnings": run.warnings,
                 }
@@ -892,6 +1016,7 @@ class GuiService:
             "metric_specs": batch.metric_specs,
             # 变量组合展开后的 run 总数。runs 只含有事件的 run，unlocked 只含
             # 没预测的——一个有结果但没锁预测的 run 会同时出现在两边，相加会重。
+            "advice": notes.get("advice"),
             "run_count": len(expand_runs(batch.dimensions)),
             "unlocked": [
                 run
@@ -915,6 +1040,8 @@ _POST_ROUTES = {
     "/api/batches": "create_batch",
     "/api/batches/meta": "revise_batch_meta",
     "/api/predictions": "lock_predictions",
+    "/api/advice": "ask_advice",
+    "/api/probe": "ask_probe",
     "/api/results": "add_results",
     "/api/results/discover": "discover_results",
     "/api/reviews": "add_review",

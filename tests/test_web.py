@@ -629,3 +629,102 @@ def test_run_count_is_not_double_counted(tmp_path):
     assert batch["run_count"] == 2
     assert len(batch["runs"]) == 1
     assert batch["unlocked"] == ["model=base", "model=large"]
+
+
+# ---------- AI 那一层 ----------
+#
+# 整层可选。不配 config.toml、不设 key、断网，GUI 的行为都不变——只是少了
+# AI 那一段：不报错、不阻断、不需要加任何 flag。
+
+_FAKE_ADVICE = {
+    "ranking": ["model=large", "model=base"],
+    "directions": [{"variable": "model", "effect": "容量更大通常更好，但小数据上收益递减"}],
+    "confounders": ["两组的数据增强配置是否一致"],
+}
+
+
+def test_advice_degrades_quietly_with_no_config(tmp_path):
+    """没有 config.toml：返回 200 + available=false，不是错误。
+
+    降级不是失败。界面显示一行安静的说明，而不是红色报错。
+    """
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    (service.root / "config.toml").unlink()
+
+    result = service.ask_advice({"batch": "b1"})
+
+    assert result["ok"] is True
+    assert result["available"] is False
+    assert result["reason"]
+    assert not [e for e in service._load()[0] if e.type == "note"]
+
+
+def test_advice_is_archived_as_a_note_and_never_touches_verdicts(tmp_path, monkeypatch):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    _add_results(service)
+    before = [r["verdict"] for r in service.state()["batches"][0]["runs"]]
+
+    monkeypatch.setattr(web, "advise", lambda root, design, runs: _FAKE_ADVICE)
+    result = service.ask_advice({"batch": "b1"})
+
+    assert result["available"] is True
+    assert result["advice"]["ranking"] == ["model=large", "model=base"]
+
+    notes = [e for e in service._load()[0] if e.type == "note"]
+    assert len(notes) == 1
+    assert notes[0].payload["kind"] == "ai_advice"
+    assert [r["verdict"] for r in service.state()["batches"][0]["runs"]] == before
+
+
+def test_advice_is_refused_before_any_prediction_is_locked(tmp_path, monkeypatch):
+    """锚定效应是硬约束。
+
+    先看到 AI 的判断，你自己的预测就失去了独立性——而独立性正是这套机制
+    价值的来源。所以不是「先算好、晚点再显示」，是那时候根本还没算。
+    """
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+
+    monkeypatch.setattr(web, "advise", lambda *a: pytest.fail("锁定之前不该发起调用"))
+    with pytest.raises(GuiInputError, match="锁定"):
+        service.ask_advice({"batch": "b1"})
+
+
+def test_probe_degrades_quietly_and_archives_when_available(tmp_path, monkeypatch):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    _add_results(service)
+
+    (service.root / "config.toml").unlink()
+    quiet = service.ask_probe({"batch": "b1", "run": "model=large"})
+    assert quiet["ok"] is True and quiet["available"] is False
+
+    monkeypatch.setattr(web, "probe", lambda root, batches, run: {"question": "两组的数据增强配置一样吗？"})
+    result = service.ask_probe({"batch": "b1", "run": "model=large"})
+
+    assert result["probe"]["question"] == "两组的数据增强配置一样吗？"
+    notes = [e for e in service._load()[0] if e.type == "note"]
+    assert [n.payload["kind"] for n in notes] == ["ai_probe"]
+    assert service.state()["batches"][0]["runs"][1]["verdict"] == "SURPRISE"
+
+
+def test_probe_only_makes_sense_for_a_surprise(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    _add_results(service)
+
+    with pytest.raises(GuiInputError, match="超出预期"):
+        service.ask_probe({"batch": "b1", "run": "model=base"})
+
+
+def test_state_exposes_archived_ai_notes(tmp_path, monkeypatch):
+    """存过的判断要能再看到，否则刷新一次就没了。"""
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    monkeypatch.setattr(web, "advise", lambda root, design, runs: _FAKE_ADVICE)
+    service.ask_advice({"batch": "b1"})
+
+    batch = service.state()["batches"][0]
+    assert batch["advice"]["ranking"] == ["model=large", "model=base"]

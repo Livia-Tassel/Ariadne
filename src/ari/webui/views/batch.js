@@ -22,6 +22,7 @@ import { chartsHtml } from "../parts/chart.js";
 import { bindForms, closeHtml, resultFormHtml, reviewFormHtml } from "../parts/forms.js";
 import { bindResults, resultsSectionHtml } from "../parts/results.js";
 import { bindLock, lockSectionHtml } from "../parts/predict.js";
+import { adviceSectionHtml, bindAdvice, bindProbe, probeHtml } from "../parts/advice.js";
 
 /** 一句话说清这一批发生了什么。计数器说不出「假设被推翻了」。 */
 function ledeHtml(batch) {
@@ -149,7 +150,7 @@ function panelHtml(batch, run) {
       : "";
 
   let action = "";
-  if (run.verdict === "SURPRISE" && !run.closed) action = reviewFormHtml(run);
+  if (run.verdict === "SURPRISE" && !run.closed) action = html`${probeHtml(run)}${reviewFormHtml(run)}`;
   else if (run.verdict === "NOISY") {
     // 补 seed 是针对这一个 run 的动作，就地做。整批录入走批次级那张表。
     action = resultFormHtml(batch, run);
@@ -252,6 +253,7 @@ export function renderBatch() {
     </table>
 
     ${lockSectionHtml(batch)}
+    ${adviceSectionHtml(batch)}
     ${resultsSectionHtml(batch)}
     ${closeHtml(batch)}
   `;
@@ -269,6 +271,8 @@ export function renderBatch() {
   bindForms(batch.id);
   bindResults(batch);
   bindLock(batch);
+  bindAdvice(batch);
+  bindProbe(batch);
 
   if (store.scrollTo) {
     const row = $(`#runs-body tr.expandable[data-run="${CSS.escape(store.scrollTo)}"]`);

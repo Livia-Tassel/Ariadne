@@ -13,7 +13,10 @@ schema 里一个数值字段都没有，且 additionalProperties 为 false——
 
 from __future__ import annotations
 
-from .llm import LLMUnavailable
+from pathlib import Path
+
+from .config import load_config, resolve_role
+from .llm import LLMUnavailable, complete
 
 ADVICE_SCHEMA = {
     "type": "object",
@@ -87,3 +90,19 @@ def check_advice(advice: dict, runs: list[str]) -> dict:
     if missing:
         raise LLMUnavailable(f"AI 的排序漏掉了 run：{'、'.join(missing)}")
     return advice
+
+
+def advise(root: Path, design, runs: list[str]) -> dict:
+    """问一次 AI 的定性判断。任何问题都抛 LLMUnavailable。
+
+    单独提出来是为了让接线测试能整体替换它——测试不该碰网络。CLI 与 GUI
+    共用这一个入口，两边的降级行为因此不会漂移。
+    """
+    ref = resolve_role(load_config(root), "reason")
+    advice = complete(
+        ref,
+        SYSTEM,
+        build_prompt(design.hypothesis, design.dimensions, runs, design.metrics),
+        ADVICE_SCHEMA,
+    )
+    return check_advice(advice, runs)

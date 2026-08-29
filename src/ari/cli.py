@@ -14,6 +14,7 @@ from rich.table import Table
 from .advising import ADVICE_SCHEMA
 from .advising import SYSTEM as ADVICE_SYSTEM
 from .advising import build_prompt as build_advice_prompt
+from .advising import advise
 from .advising import check_advice
 from .beliefs import project_beliefs
 from .beliefs import render_markdown as render_beliefs
@@ -38,6 +39,7 @@ from .probing import PROBE_SCHEMA
 from .probing import SYSTEM as PROBE_SYSTEM
 from .probing import build_prompt as build_probe_prompt
 from .probing import check_probe
+from .probing import probe
 from .project import closure_blockers, project as project_events
 from .recall import similar
 from .reviewing import (
@@ -194,21 +196,6 @@ def plan(
         ),
     )
     _show_advice(advice)
-
-
-def advise(root: Path, design, runs: list[str]) -> dict:
-    """问一次 AI 的定性判断。任何问题都抛 LLMUnavailable。
-
-    单独提出来是为了让接线测试能整体替换它——测试不该碰网络。
-    """
-    ref = resolve_role(load_config(root), "reason")
-    advice = complete(
-        ref,
-        ADVICE_SYSTEM,
-        build_advice_prompt(design.hypothesis, design.dimensions, runs, design.metrics),
-        ADVICE_SCHEMA,
-    )
-    return check_advice(advice, runs)
 
 
 def _show_advice(advice: dict) -> None:
@@ -467,30 +454,6 @@ def review(
         return
     _write(parsed, batch.id, None)
     typer.echo(f"批次 {batch.id} 已收口。")
-
-
-def probe(root: Path, batches: dict, run) -> dict:
-    """问一次有针对性的追问。任何问题都抛 LLMUnavailable。
-
-    单独提出来是为了让接线测试能整体替换它——测试不该碰网络。
-    """
-    ref = resolve_role(load_config(root), "reason")
-    history = similar(batches, run)
-    hypothesis = batches[run.batch].hypothesis if run.batch in batches else ""
-    result = complete(
-        ref,
-        PROBE_SYSTEM,
-        build_probe_prompt(
-            batch=run.batch,
-            run=run.run,
-            hypothesis=hypothesis,
-            deviations=deviation_lines(run),
-            rationale=(run.prediction or {}).get("rationale", ""),
-            history=history,
-        ),
-        PROBE_SCHEMA,
-    )
-    return check_probe(result)
 
 
 def _probe_or_none(root: Path, batches: dict, run, runs_path: Path) -> dict | None:
