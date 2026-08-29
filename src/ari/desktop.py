@@ -12,10 +12,10 @@ import os
 import sys
 import threading
 from datetime import datetime
-from importlib.resources import files
 from pathlib import Path
 from typing import Callable
 
+from .resources import asset_file
 from .web import make_server
 from .workspace import initialize_project
 
@@ -85,10 +85,9 @@ class RecentProjects:
 
 def launcher_html() -> str:
     """把启动页三件静态资源组装成可直接交给原生 WebView 的 HTML。"""
-    root = files("ari").joinpath("desktopui")
-    html = root.joinpath("index.html").read_text(encoding="utf-8")
-    css = root.joinpath("styles.css").read_text(encoding="utf-8")
-    javascript = root.joinpath("app.js").read_text(encoding="utf-8")
+    html = asset_file("desktopui", "index.html").read_text(encoding="utf-8")
+    css = asset_file("desktopui", "styles.css").read_text(encoding="utf-8")
+    javascript = asset_file("desktopui", "app.js").read_text(encoding="utf-8")
     return html.replace("/*__ARIADNE_CSS__*/", css).replace("/*__ARIADNE_JS__*/", javascript)
 
 

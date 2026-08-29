@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
+from datetime import datetime
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -188,7 +190,12 @@ def test_http_server_serves_the_app_and_json_api(http_gui):
         html = response.read().decode()
         assert response.status == 200
         assert "Ariadne" in html
-        assert "新实验" in html
+        assert "账本" in html
+
+    # 前端是 ES 模块，子目录必须能取到，否则页面整个起不来。
+    with _open(http_gui + "/lib/dom.js", timeout=3) as response:
+        assert response.status == 200
+        assert "export" in response.read().decode()
 
     with _open(http_gui + "/api/state", timeout=3) as response:
         state = json.loads(response.read())
@@ -360,3 +367,121 @@ def test_static_paths_inside_webui_are_served(url_path, expected):
 )
 def test_static_paths_outside_webui_are_refused(url_path):
     assert web._static_target(url_path) is None
+
+
+def _batch_with_files(tmp_path, template="logs/{model}/s{seed}/results.json"):
+    """建一个声明了 result_path 的批次，并在项目里放两个结果文件。"""
+    root = tmp_path / "p"
+    service = GuiService(root)
+    payload = _batch_payload()
+    payload["result_path"] = template
+    service.create_batch(payload)
+
+    def write(relative, body):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(body), encoding="utf-8")
+        return path
+
+    write("logs/base/s0/results.json", {"top1_acc": 0.81})
+    write("logs/large/s0/results.json", {"metrics": {"top1_acc": 0.84}})
+    return service, root, write
+
+
+def test_discover_finds_result_files_by_template(tmp_path):
+    """自动发现是主路径：结果形态就是每个 run 一个 JSON。"""
+    service, _, _ = _batch_with_files(tmp_path)
+
+    result = service.discover_results({"batch": "b1"})
+
+    rows = {row["run"]: row for row in result["found"]}
+    assert set(rows) == {"model=base", "model=large"}
+    assert rows["model=base"]["metrics"] == {"top1_acc": 0.81}
+    # 嵌套一层也能取到——parse_result_file 会往下找一层同名键。
+    assert rows["model=large"]["metrics"] == {"top1_acc": 0.84}
+    assert rows["model=base"]["seed"] == 0
+    assert rows["model=base"]["source"]["path"] == "logs/base/s0/results.json"
+    assert rows["model=base"]["source"]["mtime"]
+    assert result["unmatched"] == []
+    assert result["errors"] == []
+
+
+def test_discover_writes_nothing(tmp_path):
+    """只读。抽到的东西要先给人看一眼再确认——错的指标进表比缺失更有害。"""
+    service, _, _ = _batch_with_files(tmp_path)
+    before = service.runs_path.read_text(encoding="utf-8")
+
+    service.discover_results({"batch": "b1"})
+
+    assert service.runs_path.read_text(encoding="utf-8") == before
+
+
+def test_discover_reports_files_that_match_the_template_but_no_run(tmp_path):
+    """模板对得上却不属于任何 run：多半是模板写错了，或跑了计划外的配置。"""
+    service, _, write = _batch_with_files(tmp_path)
+    write("logs/xlarge/s0/results.json", {"top1_acc": 0.9})
+
+    result = service.discover_results({"batch": "b1"})
+
+    assert result["unmatched"] == ["logs/xlarge/s0/results.json"]
+    assert len(result["found"]) == 2
+
+
+def test_discover_reports_unreadable_files_without_losing_the_others(tmp_path):
+    """一个文件坏了不该让整次发现失败——其余的照常抽出来。"""
+    service, root, _ = _batch_with_files(tmp_path)
+    (root / "logs/base/s0/results.json").write_text("{ 这不是 json", encoding="utf-8")
+
+    result = service.discover_results({"batch": "b1"})
+
+    assert [row["run"] for row in result["found"]] == ["model=large"]
+    assert len(result["errors"]) == 1
+    assert result["errors"][0]["path"] == "logs/base/s0/results.json"
+
+
+def test_discover_reports_metrics_the_file_does_not_contain(tmp_path):
+    """取不到的指标明确报告，不填空。"""
+    service, root, _ = _batch_with_files(tmp_path)
+    (root / "logs/base/s0/results.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
+
+    row = next(r for r in service.discover_results({"batch": "b1"})["found"] if r["run"] == "model=base")
+
+    assert row["missing"] == ["top1_acc"]
+
+
+def test_discover_marks_seeds_already_in_the_ledger(tmp_path):
+    """已经录过的 seed 要标出来，否则确认表会诱导用户提交一次必然失败的写入。"""
+    service, _, _ = _batch_with_files(tmp_path)
+    service.add_results(
+        {"batch": "b1", "rows": [{"run": "model=base", "seed": 0, "metrics": {"top1_acc": 0.81}}]}
+    )
+
+    rows = {row["run"]: row for row in service.discover_results({"batch": "b1"})["found"]}
+
+    assert rows["model=base"]["existing"] is True
+    assert rows["model=large"]["existing"] is False
+
+
+def test_discover_needs_a_result_path(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+
+    with pytest.raises(GuiInputError) as exc:
+        service.discover_results({"batch": "b1"})
+    assert "result_path" in str(exc.value) or "路径模板" in str(exc.value)
+
+
+def test_discovered_results_keep_the_integrity_check_alive(tmp_path):
+    """发现 → 确认 → 入库这条路走完，mtime 早于预测就该被标记。
+
+    这正是自动发现必须是主路径的原因：手敲没有 mtime，也就没有这个检查。
+    """
+    service, root, _ = _batch_with_files(tmp_path)
+    old = datetime(2020, 1, 1).timestamp()
+    os.utime(root / "logs/base/s0/results.json", (old, old))
+
+    found = service.discover_results({"batch": "b1"})["found"]
+    service.add_results({"batch": "b1", "rows": found})
+
+    run = next(r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=base")
+    assert "result_predates_prediction" in run["integrity"]

@@ -655,3 +655,16 @@ details > summary:hover { color: var(--ink); }
   body { background: #fff; }
   .wrap { max-width: none; padding: 0; }
 }
+
+/* ---------- 录入结果 ---------- */
+
+.scan-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 0 4px; }
+.scan-line .seeds { margin-right: auto; }
+.col-pick { width: 30px; }
+.col-pick input { width: auto; }
+.col-src { text-align: left !important; color: var(--ink-3); }
+/* 第一列是勾选框，run 落到第二列——台账的第一列永远左对齐。 */
+table.pick-table td:nth-child(2), table.pick-table th:nth-child(2) { text-align: left; }
+table.ledger td.col-src { font-size: 11.5px; }
+.rule-head .tally { font: 11.5px/1.6 var(--mono); color: var(--ink-3); }
+table.ledger td input { padding: 4px 7px; font-size: 12.5px; }

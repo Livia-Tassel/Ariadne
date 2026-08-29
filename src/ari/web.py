@@ -25,7 +25,7 @@ from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
 from .ideas import make_idea_id, project_ideas
-from .ingest import compile_template
+from .ingest import compile_template, discover, parse_result_file
 from .metrics import MetricSpec, default_spec
 from .papers import (
     SECTIONS,
@@ -200,6 +200,65 @@ class GuiService:
         if len(set(order)) != len(order):
             raise GuiInputError("预期排序里有重复的 run")
         return {"metric": metric, "order": list(order)}
+
+    def discover_results(self, payload: dict) -> dict:
+        """按 result_path 模板扫出结果文件并解析，**不写盘**。
+
+        抽到的东西先给人看一眼再确认：错的指标进表比缺失指标更有害。写入
+        仍然走 add_results，这个接口只负责"抽到了这些，对吗？"那一步。
+
+        一个文件坏了不该让整次发现失败——其余的照常抽出来，坏的单独报告。
+        """
+        batch_id = _text(payload.get("batch"), "批次")
+        _, _, batches, _, _, _, _ = self._load()
+        batch = batches.get(batch_id)
+        if batch is None:
+            raise GuiInputError(f"找不到批次 {batch_id}", 404)
+        if not batch.result_path:
+            raise GuiInputError(
+                f"批次 {batch_id} 没有声明结果路径模板，无法自动发现。"
+                "在批次页填一个（形如 logs/{model}/s{seed}/results.json），或手工录入"
+            )
+        metric_names = self._batch_metric_names(batch)
+        if not metric_names:
+            raise GuiInputError(f"批次 {batch_id} 还没有预测，无从知道要抽哪些指标")
+
+        root = Path(self.root)
+        try:
+            found, unmatched = discover(root, batch.result_path, list(batch.runs))
+        except (re.error, ValueError) as exc:
+            raise GuiInputError(f"结果路径模板有问题：{exc}") from exc
+
+        taken = {
+            (run.run, seed)
+            for run in batch.runs.values()
+            for samples in run.samples.values()
+            for seed in samples
+        }
+
+        rows: list[dict] = []
+        errors: list[dict] = []
+        for item in found:
+            relative = item.path.relative_to(root).as_posix()
+            try:
+                parsed = parse_result_file(item.path, metric_names)
+            except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                errors.append({"path": relative, "reason": str(exc)})
+                continue
+            rows.append(
+                {
+                    "run": item.run,
+                    "seed": item.seed,
+                    "metrics": parsed.metrics,
+                    "missing": parsed.missing,
+                    "note": parsed.note,
+                    "existing": (item.run, item.seed) in taken,
+                    "source": {"path": relative, "mtime": parsed.mtime or None},
+                }
+            )
+
+        rows.sort(key=lambda row: (row["run"], row["seed"]))
+        return {"ok": True, "found": rows, "unmatched": unmatched, "errors": errors}
 
     def add_results(self, payload: dict) -> dict:
         batch_id = _text(payload.get("batch"), "批次")
@@ -788,6 +847,7 @@ _POST_ROUTES = {
     "/api/batches": "create_batch",
     "/api/batches/meta": "revise_batch_meta",
     "/api/results": "add_results",
+    "/api/results/discover": "discover_results",
     "/api/reviews": "add_review",
     "/api/batches/close": "close_batch",
     "/api/ideas": "add_idea",
