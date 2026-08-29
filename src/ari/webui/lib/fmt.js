@@ -52,8 +52,11 @@ export function fmtSmall(value) {
 export function fmtDeviation(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
   const number = Number(value);
-  const sign = number > 0 ? "+" : number < 0 ? "−" : "±";
-  return sign + fmtSmall(number);
+  const magnitude = fmtSmall(number);
+  // 符号在格式化之后才定：-1.11e-16 舍入后就是 0，没有方向可言，
+  // 显示成「−0」既难看又在说一件不成立的事。
+  if (magnitude === "0") return "±0";
+  return (number > 0 ? "+" : "−") + magnitude;
 }
 
 /**

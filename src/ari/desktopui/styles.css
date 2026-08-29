@@ -1,63 +1,125 @@
 :root {
-  --ink: #15272f;
-  --navy: #123644;
-  --teal: #20827b;
-  --muted: #6f7b7e;
-  --paper: #f3f1ec;
-  --surface: #fffefa;
-  --line: #dedbd2;
+  --paper: #fdfcf8;
+  --paper-2: #f6f4ed;
+  --ink: #191714;
+  --ink-2: #5f5850;
+  --ink-3: #98918a;
+  --rule: #ddd7cc;
+  --rule-2: #ebe6db;
+  --signal: #ab2f22;
+  --signal-bg: #f8ece9;
+  /* 与 webui 同一套字体：拉丁落 Times New Roman，汉字落宋体。 */
+  --serif: "Times New Roman", Times, "Songti SC", SimSun, STSong,
+    "Source Han Serif SC", "Noto Serif CJK SC", serif;
 }
-* { box-sizing: border-box; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #14130f;
+    --paper-2: #1b1915;
+    --ink: #e8e3d8;
+    --ink-2: #a49c8e;
+    --ink-3: #6e675c;
+    --rule: #302c25;
+    --rule-2: #242019;
+    --signal: #e0685a;
+    --signal-bg: rgba(224, 104, 90, 0.13);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
+
 body {
-  margin: 0; min-width: 760px; min-height: 600px; color: var(--ink); background: var(--paper);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  min-width: 680px; min-height: 560px;
+  color: var(--ink); background: var(--paper);
+  font: 15px/1.75 var(--serif);
+  -webkit-font-smoothing: antialiased;
 }
-button { font: inherit; }
-.launcher { min-height: 100vh; display: grid; grid-template-columns: 1.05fr .95fr; }
-.intro { position: relative; overflow: hidden; padding: clamp(58px, 8vw, 110px); color: white; background: linear-gradient(142deg, #102f3b, #1c5661); }
-.intro::after { content: ""; position: absolute; width: 500px; height: 500px; right: -250px; bottom: -210px; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; box-shadow: 0 0 0 80px rgba(255,255,255,.025), 0 0 0 160px rgba(255,255,255,.02); }
-.brand { display: flex; align-items: center; gap: 13px; }
-.brand span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; color: var(--navy); background: #e6f1ee; font: 700 23px Georgia, serif; }
-.brand strong { font: 600 22px Georgia, serif; letter-spacing: .03em; }
-.eyebrow { margin: 0; color: #67c2b7; font-size: 10px; font-weight: 800; letter-spacing: .19em; }
-.intro .eyebrow { margin-top: 120px; }
-h1 { max-width: 620px; margin: 12px 0 22px; font: 400 clamp(42px, 5vw, 68px)/1.12 Georgia, "Songti SC", serif; letter-spacing: -.035em; }
-.lead { max-width: 530px; color: #c1d3d5; font-size: 16px; line-height: 1.8; }
-.privacy { position: absolute; left: clamp(58px, 8vw, 110px); bottom: 58px; z-index: 1; color: #8fadb1; font-size: 12px; }
-.privacy b { color: #61c2ad; margin-right: 7px; }
-.thread { position: absolute; top: 80px; right: 70px; width: 120px; height: 120px; opacity: .22; }
-.thread i { position: absolute; inset: 0; border: 1px solid white; border-radius: 50%; }
-.thread i:nth-child(2) { inset: 20px -28px -20px 28px; }
-.thread i:nth-child(3) { inset: 48px 12px -48px -12px; }
-.projects { padding: clamp(58px, 7vw, 100px); display: flex; flex-direction: column; justify-content: center; background: var(--surface); }
-.projects h2 { margin: 8px 0 8px; font: 500 32px Georgia, "Songti SC", serif; }
-.help { margin: 0 0 36px; color: var(--muted); line-height: 1.7; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* 单栏、居中、细线。不做左右分栏的落地页——这是一本台账的扉页，
+   不是一个产品官网。 */
+.launcher {
+  max-width: 620px; margin: 0 auto;
+  padding: clamp(56px, 11vh, 110px) 40px 60px;
+}
+
+.brand {
+  display: flex; align-items: baseline; gap: 9px;
+  padding-bottom: 10px; border-bottom: 2px solid var(--ink);
+}
+.brand i { font-style: normal; color: var(--signal); font-size: 19px; line-height: 1; }
+.brand strong { font-size: 18px; font-weight: 600; letter-spacing: 0.02em; }
+.brand span {
+  margin-left: auto; color: var(--ink-3);
+  font-size: 12px; letter-spacing: 0.04em;
+}
+
+h1 {
+  margin: 30px 0 10px;
+  font-size: 29px; font-weight: 600; line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+.lead { max-width: 34em; color: var(--ink-2); font-size: 14.5px; }
+.lead b { color: var(--ink); font-weight: 600; }
+
+.loop {
+  margin: 22px 0 26px; padding: 13px 0;
+  border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+  color: var(--ink-3); font-size: 13px; letter-spacing: 0.04em;
+}
+.loop b { color: var(--ink); font-weight: 600; }
+.loop i { font-style: normal; color: var(--rule); margin: 0 7px; }
+
+.rule-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-top: 30px; padding-bottom: 6px; border-bottom: 1px solid var(--ink);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; color: var(--ink-2);
+}
+.help { margin: 12px 0 16px; color: var(--ink-2); font-size: 13.5px; }
+
 .primary {
-  width: 100%; padding: 18px 20px; border: 0; border-radius: 15px; display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 13px;
-  color: white; background: var(--navy); box-shadow: 0 14px 28px rgba(18,54,68,.17); text-align: left; cursor: pointer; transition: .16s ease;
+  display: inline-flex; align-items: baseline; gap: 9px;
+  padding: 9px 18px;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+  font-size: 14.5px; font-weight: 600;
+  transition: opacity 0.14s;
 }
-.primary:hover { transform: translateY(-1px); background: #19495a; }
-.primary:disabled { opacity: .65; cursor: wait; transform: none; }
-.primary > span { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: var(--navy); background: #ddede9; font-size: 20px; }
-.primary strong, .primary small { display: block; }
-.primary small { margin-top: 2px; color: #a9c0c4; font-size: 11px; }
-.primary > b { font-size: 21px; }
-.message { margin-top: 14px; padding: 11px 13px; border-radius: 10px; color: #9b402e; background: #fff0eb; font-size: 12px; }
-.recent-title { margin: 34px 0 12px; display: flex; align-items: center; gap: 12px; color: #899194; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.recent-title i { flex: 1; height: 1px; background: var(--line); }
-.recent-list { display: grid; gap: 8px; }
-.recent-project { width: 100%; padding: 12px 13px; border: 1px solid #e4e1d9; border-radius: 11px; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px; color: var(--ink); background: #fff; text-align: left; cursor: pointer; }
-.recent-project:hover { border-color: #b7c9c6; background: #fbfdfc; }
-.recent-project > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; color: var(--teal); background: #e4f0ed; }
-.recent-project strong, .recent-project small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recent-project strong { font-size: 13px; }
-.recent-project small { max-width: 280px; color: #8a9295; font-size: 10px; }
-.recent-project b { color: #8a9295; }
-@media (max-width: 900px) {
-  .launcher { grid-template-columns: 1fr; }
-  .intro { min-height: 320px; padding: 45px; }
-  .intro .eyebrow { margin-top: 60px; }
-  .privacy { display: none; }
-  .projects { padding: 45px; }
+.primary:hover { opacity: 0.84; }
+.primary:disabled { opacity: 0.45; cursor: wait; }
+.primary small { color: inherit; opacity: 0.72; font-size: 12.5px; font-weight: 400; }
+
+.message {
+  margin-top: 14px; padding: 10px 13px;
+  border-left: 2px solid var(--signal); background: var(--signal-bg);
+  color: var(--signal); font-size: 13.5px;
+}
+
+.recent-list { display: block; }
+.recent-project {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline; gap: 14px;
+  width: 100%; padding: 11px 8px; text-align: left;
+  border-bottom: 1px solid var(--rule-2);
+  transition: background 0.12s;
+}
+.recent-project:hover { background: var(--paper-2); }
+.recent-project strong { display: block; font-size: 14.5px; font-weight: 600; }
+.recent-project small {
+  display: block; margin-top: 2px; color: var(--ink-3); font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recent-project b { color: var(--ink-3); font-weight: 400; font-size: 13px; }
+.recent-project:hover b { color: var(--signal); }
+
+.privacy {
+  margin-top: 34px; padding-top: 13px; border-top: 1px solid var(--rule);
+  color: var(--ink-3); font-size: 12.5px;
+}
+.privacy b { color: var(--signal); font-weight: 400; margin-right: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
 }

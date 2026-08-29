@@ -26,11 +26,13 @@
   --signal-bg: #f8ece9;
   --focus: rgba(171, 47, 34, 0.4);
 
-  --serif: "Iowan Old Style", "Charter", Palatino, "Songti SC",
-    "Source Han Serif SC", "Noto Serif CJK SC", Georgia, serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* 一套字体，两种文字。浏览器逐字符回退：拉丁字母落 Times New Roman，
+     汉字落宋体。列对齐靠 font-variant-numeric: tabular-nums 保住——
+     Times New Roman 的数字本来就是等宽的。 */
+  --serif: "Times New Roman", Times, "Songti SC", SimSun, STSong,
+    "Source Han Serif SC", "Noto Serif CJK SC", serif;
+  --mono: var(--serif);
+  --sans: var(--serif);
 
   --col: 1080px;
   --gutter: 34px;
@@ -58,7 +60,7 @@ html { background: var(--paper); }
 body {
   background: var(--paper);
   color: var(--ink);
-  font: 13.5px/1.65 var(--sans);
+  font: 15px/1.75 var(--sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -116,7 +118,7 @@ a { color: inherit; text-decoration: none; }
 .icon {
   padding: 5px 9px;
   color: var(--ink-3);
-  font: 11px/1.5 var(--mono);
+  font: 13.5px/1.5 var(--mono);
   border: 1px solid var(--rule);
 }
 .icon:hover { color: var(--ink); border-color: var(--ink-3); }
@@ -130,7 +132,7 @@ a { color: inherit; text-decoration: none; }
   display: flex; align-items: baseline; gap: 8px 18px; flex-wrap: wrap;
   padding: 15px 0 13px;
   border-bottom: 1px solid var(--rule);
-  font: 11px/1.4 var(--mono);
+  font: 12.5px/1.4 var(--mono);
   color: var(--ink-3);
   letter-spacing: 0.04em;
 }
@@ -156,14 +158,14 @@ p.page-sub { margin-bottom: 22px; color: var(--ink-2); font-size: 13px; }
   border-bottom: 1px solid var(--ink);
 }
 .rule-head h2 {
-  font: 600 10.5px/1 var(--mono);
-  letter-spacing: 0.18em; text-transform: uppercase;
+  font: 700 12px/1 var(--mono);
+  letter-spacing: 0.05em;
   color: var(--ink-2);
 }
-.rule-head a { font-size: 12px; color: var(--ink-3); }
+.rule-head a { font-size: 13px; color: var(--ink-3); }
 .rule-head a:hover { color: var(--signal); }
 
-.loading { padding: 40px 0; color: var(--ink-3); font: 12px/1 var(--mono); }
+.loading { padding: 40px 0; color: var(--ink-3); font: 13px/1 var(--mono); }
 
 /* ---------- 待办清单：首屏的全部 ---------- */
 
@@ -180,18 +182,18 @@ p.page-sub { margin-bottom: 22px; color: var(--ink-2); font-size: 13px; }
 .todo-row:first-child { border-top: 1px solid var(--rule); }
 .todo-row:hover { background: var(--paper-2); }
 .todo-kind {
-  font: 600 11px/1.5 var(--mono);
-  letter-spacing: 0.06em;
+  font: 700 12.5px/1.5 var(--mono);
+  letter-spacing: 0.02em;
   color: var(--ink-3);
   white-space: nowrap;
 }
-.todo-where { font: 12px/1.5 var(--mono); color: var(--ink-3); }
+.todo-where { font: 13px/1.5 var(--mono); color: var(--ink-3); }
 .todo-what { min-width: 0; color: var(--ink); font-size: 13px; }
 .todo-what .run { font: 12.5px/1 var(--mono); color: var(--ink-2); margin-right: 9px; }
 .todo-what .move { font: 12.5px/1 var(--mono); }
 .todo-what .move b { font-weight: 600; }
-.todo-what small { color: var(--ink-3); font-size: 12px; }
-.todo-go { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.todo-what small { color: var(--ink-3); font-size: 13px; }
+.todo-go { font-size: 13.5px; color: var(--ink-3); white-space: nowrap; }
 .todo-row:hover .todo-go { color: var(--signal); }
 
 /* 红竖线只给两种行：待复盘的意外、预测缺席。其余靠位置排序表达优先级。 */
@@ -209,11 +211,11 @@ p.page-sub { margin-bottom: 22px; color: var(--ink-2); font-size: 13px; }
   display: flex; align-items: baseline; gap: 8px 14px; flex-wrap: wrap;
   margin-top: 22px; padding-top: 13px;
   border-top: 1px solid var(--rule);
-  font: 12px/1.6 var(--mono);
+  font: 13px/1.6 var(--mono);
   color: var(--ink-3);
 }
 .spread-strip .lbl {
-  font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  font-size: 10.5px; letter-spacing: 0.05em;
 }
 .spread-strip s { text-decoration: none; color: var(--ink-2); }
 .spread-strip s.hot { color: var(--signal); font-weight: 600; }
@@ -223,15 +225,15 @@ p.page-sub { margin-bottom: 22px; color: var(--ink-2); font-size: 13px; }
 table.ledger { width: 100%; border-collapse: collapse; }
 table.ledger caption {
   text-align: left; padding-bottom: 7px;
-  font: 600 10px/1.4 var(--mono);
-  letter-spacing: 0.16em; color: var(--ink-3);
+  font: 700 11.5px/1.4 var(--mono);
+  letter-spacing: 0.05em; color: var(--ink-3);
 }
 table.ledger th {
   padding: 0 0 6px 16px;
   border-bottom: 1px solid var(--ink);
   text-align: right;
-  font: 600 10px/1.4 var(--mono);
-  letter-spacing: 0.12em; color: var(--ink-3);
+  font: 700 11.5px/1.4 var(--mono);
+  letter-spacing: 0.04em; color: var(--ink-3);
   white-space: nowrap;
 }
 table.ledger th:first-child { text-align: left; padding-left: 10px; }
@@ -239,13 +241,13 @@ table.ledger td {
   padding: 8px 0 8px 16px;
   border-bottom: 1px solid var(--rule-2);
   text-align: right; vertical-align: baseline;
-  font: 12.5px/1.5 var(--mono);
+  font: 13.5px/1.5 var(--mono);
 }
 table.ledger td:first-child { text-align: left; padding-left: 10px; color: var(--ink-2); }
 table.ledger tbody tr:last-child > td { border-bottom: 1px solid var(--rule); }
 table.ledger .dev { font-weight: 600; color: var(--ink); }
 table.ledger .verdict {
-  font: 11px/1.5 var(--mono); letter-spacing: 0.08em; color: var(--ink-3);
+  font: 13.5px/1.5 var(--mono); letter-spacing: 0.03em; color: var(--ink-3);
   white-space: nowrap;
 }
 
@@ -277,12 +279,12 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
   transition: background 0.12s;
 }
 .batch-line:hover { background: var(--paper-2); }
-.batch-line .bid { font: 600 12.5px/1.5 var(--mono); color: var(--ink); }
+.batch-line .bid { font: 700 13.5px/1.5 var(--mono); color: var(--ink); }
 .batch-line .hyp {
   min-width: 0; font: 14px/1.5 var(--serif); color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.batch-line .hyp em { font-style: normal; color: var(--ink-3); font-size: 12.5px; }
+.batch-line .hyp em { font-style: normal; color: var(--ink-3); font-size: 13.5px; }
 .batch-line .tally {
   font: 11.5px/1.5 var(--mono); color: var(--ink-3);
   letter-spacing: 0.04em; white-space: nowrap;
@@ -292,15 +294,15 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
 
 /* ---------- 批次详情 ---------- */
 
-.crumb { display: inline-block; margin: 22px 0 14px; font: 11.5px/1 var(--mono); color: var(--ink-3); }
+.crumb { display: inline-block; margin: 22px 0 14px; font: 13px/1 var(--mono); color: var(--ink-3); }
 .crumb:hover { color: var(--signal); }
 
 .batch-doc { border-bottom: 2px solid var(--ink); padding-bottom: 9px; }
 .batch-doc .no {
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  font: 600 10.5px/1.4 var(--mono); letter-spacing: 0.14em; color: var(--ink-2);
+  font: 700 12px/1.4 var(--mono); letter-spacing: 0.04em; color: var(--ink-2);
 }
-.batch-doc .no .when { font-weight: 400; color: var(--ink-3); letter-spacing: 0.06em; }
+.batch-doc .no .when { font-weight: 400; color: var(--ink-3); letter-spacing: 0.02em; }
 .batch-doc h2 {
   margin: 14px 0 5px;
   font: 600 19px/1.5 var(--serif);
@@ -318,7 +320,7 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
 .facts {
   display: flex; flex-wrap: wrap; gap: 6px 22px;
   margin-top: 13px;
-  font: 11.5px/1.6 var(--mono); color: var(--ink-3);
+  font: 13px/1.6 var(--mono); color: var(--ink-3);
 }
 .facts b { color: var(--ink); font-weight: 600; }
 .facts a { color: var(--ink-2); border-bottom: 1px solid var(--rule); }
@@ -327,7 +329,7 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
 .tally-line {
   display: flex; flex-wrap: wrap; gap: 6px 26px;
   margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule-2);
-  font: 11.5px/1.6 var(--mono); color: var(--ink-3);
+  font: 13px/1.6 var(--mono); color: var(--ink-3);
 }
 .tally-line b { color: var(--ink); font-weight: 600; }
 .tally-line .hot b { color: var(--signal); }
@@ -338,7 +340,7 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
   margin: 14px 0; padding: 10px 13px;
   border-left: 2px solid var(--rule);
   background: var(--paper-2);
-  font-size: 12.5px; color: var(--ink-2);
+  font-size: 13.5px; color: var(--ink-2);
 }
 .note.hot { border-left-color: var(--signal); background: var(--signal-bg); color: var(--signal); }
 .note ul { margin: 5px 0 0; padding-left: 17px; }
@@ -349,7 +351,7 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
   background: var(--paper-3);
 }
 .ask .q {
-  font: 600 10px/1.4 var(--mono); letter-spacing: 0.16em; color: var(--signal);
+  font: 700 11.5px/1.4 var(--mono); letter-spacing: 0.05em; color: var(--signal);
 }
 .ask p { margin-top: 6px; font: 13.5px/1.7 var(--serif); }
 
@@ -357,7 +359,7 @@ tr.detail > td { padding: 0 0 0 10px; background: var(--paper-2); text-align: le
 
 .field { display: grid; gap: 5px; margin-bottom: 14px; }
 .field:last-child { margin-bottom: 0; }
-.field > label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.field > label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .field .hint { font-weight: 400; color: var(--ink-3); }
 
 input, textarea, select {
@@ -383,13 +385,13 @@ input.mono, .mono input { font-family: var(--mono); }
   border-bottom: 1px solid var(--rule);
 }
 .block > h3 { font: 600 14px/1.5 var(--serif); margin-bottom: 3px; }
-.block > h3 + p { margin-bottom: 15px; color: var(--ink-2); font-size: 12.5px; }
+.block > h3 + p { margin-bottom: 15px; color: var(--ink-2); font-size: 13.5px; }
 .block-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
   margin-bottom: 13px;
 }
 .block-head > div > h3 { font: 600 14px/1.5 var(--serif); margin-bottom: 3px; }
-.block-head p { color: var(--ink-2); font-size: 12.5px; }
+.block-head p { color: var(--ink-2); font-size: 13.5px; }
 
 .acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .acts.left { justify-content: flex-start; }
@@ -398,7 +400,7 @@ input.mono, .mono input { font-family: var(--mono); }
   display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 15px;
   border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
-  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  font-size: 13.5px; font-weight: 600; white-space: nowrap;
   transition: opacity 0.12s;
 }
 .btn:hover { opacity: 0.82; }
@@ -406,16 +408,16 @@ input.mono, .mono input { font-family: var(--mono); }
 .btn.ghost:hover { color: var(--ink); border-color: var(--ink-3); opacity: 1; }
 .btn.warn { background: none; color: var(--signal); border-color: var(--signal); }
 .btn.warn:hover { background: var(--signal); color: var(--paper); opacity: 1; }
-.btn.sm { padding: 5px 11px; font-size: 12px; }
+.btn.sm { padding: 5px 11px; font-size: 13px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.link { color: var(--ink-2); border-bottom: 1px solid var(--rule); font-size: 12.5px; }
+.link { color: var(--ink-2); border-bottom: 1px solid var(--rule); font-size: 13.5px; }
 .link:hover { color: var(--signal); border-bottom-color: var(--signal); }
 
 .err {
   margin: 12px 0; padding: 9px 12px;
   border-left: 2px solid var(--signal); background: var(--signal-bg);
-  color: var(--signal); font-size: 12.5px;
+  color: var(--signal); font-size: 13.5px;
 }
 
 .rows { display: grid; gap: 7px; }
@@ -435,7 +437,7 @@ input.mono, .mono input { font-family: var(--mono); }
 .steps {
   display: flex; align-items: center; gap: 10px;
   margin: 22px 0 4px;
-  font: 11px/1 var(--mono); letter-spacing: 0.1em; color: var(--ink-3);
+  font: 11px/1 var(--mono); letter-spacing: 0.03em; color: var(--ink-3);
 }
 .steps .on { color: var(--ink); font-weight: 600; }
 .steps .done { color: var(--ink-2); }
@@ -450,13 +452,13 @@ input.mono, .mono input { font-family: var(--mono); }
   border-bottom: 1px solid var(--rule-2);
 }
 .entry:hover { background: var(--paper-2); }
-.entry .eid { font: 11.5px/1.6 var(--mono); color: var(--ink-3); }
+.entry .eid { font: 13px/1.6 var(--mono); color: var(--ink-3); }
 .entry .txt { font: 14px/1.6 var(--serif); }
-.entry .txt small { display: block; margin-top: 3px; font-size: 12.5px; color: var(--ink-2); font-family: var(--sans); }
-.entry .st { font: 11px/1.6 var(--mono); letter-spacing: 0.08em; color: var(--ink-3); white-space: nowrap; }
+.entry .txt small { display: block; margin-top: 3px; font-size: 13.5px; color: var(--ink-2); font-family: var(--sans); }
+.entry .st { font: 11px/1.6 var(--mono); letter-spacing: 0.03em; color: var(--ink-3); white-space: nowrap; }
 .entry.gone .txt, .entry.gone .eid { color: var(--ink-3); }
 .entry.gone .txt { text-decoration: line-through; text-decoration-thickness: 1px; }
-.entry .refs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; font: 11.5px/1.6 var(--mono); }
+.entry .refs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; font: 13px/1.6 var(--mono); }
 .entry .refs a { color: var(--ink-2); border-bottom: 1px solid var(--rule); }
 .entry .refs a:hover { color: var(--signal); }
 .entry-acts { display: flex; gap: 8px; margin-top: 8px; }
@@ -469,9 +471,9 @@ input.mono, .mono input { font-family: var(--mono); }
 .chart-head {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding-bottom: 6px; border-bottom: 1px solid var(--ink);
-  font: 11px/1.4 var(--mono); letter-spacing: 0.08em; color: var(--ink-3);
+  font: 12.5px/1.4 var(--mono); letter-spacing: 0.03em; color: var(--ink-3);
 }
-.chart-head b { color: var(--ink); font-size: 12px; letter-spacing: 0.04em; }
+.chart-head b { color: var(--ink); font-size: 13px; letter-spacing: 0.04em; }
 .chart-head .legend { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .chart-head .legend svg { flex: none; }
 .chart-row {
@@ -480,10 +482,10 @@ input.mono, .mono input { font-family: var(--mono); }
   height: 26px; border-bottom: 1px solid var(--rule-2);
 }
 .chart-row .lb {
-  font: 11.5px/1 var(--mono); color: var(--ink-3);
+  font: 13px/1 var(--mono); color: var(--ink-3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.chart-row .val { text-align: right; font: 11.5px/1 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.chart-row .val { text-align: right; font: 13px/1 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .chart-row .val b { color: var(--ink); font-weight: 600; }
 .chart-row.miss .lb, .chart-row.miss .val b { color: var(--signal); }
 .trk { display: block; overflow: visible; }
@@ -499,28 +501,28 @@ input.mono, .mono input { font-family: var(--mono); }
 .chart-axis {
   display: flex; justify-content: space-between;
   padding: 6px 176px 0 180px;
-  font: 10.5px/1 var(--mono); color: var(--ink-3);
+  font: 13px/1 var(--mono); color: var(--ink-3);
 }
 
 /* ---------- run 明细 ---------- */
 
 .panel { padding: 14px 0 20px; display: grid; gap: 15px; }
 .panel h4 {
-  font: 600 10px/1.4 var(--mono); letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--ink-3); margin-bottom: 7px;
+  font: 700 11.5px/1.4 var(--mono); letter-spacing: 0.05em;
+  color: var(--ink-3); margin-bottom: 7px;
 }
 .quote {
   padding-left: 13px; border-left: 2px solid var(--rule);
   font: 13.5px/1.75 var(--serif); color: var(--ink-2);
 }
 .quote .meta { display: block; margin-top: 5px; font: 11px/1 var(--mono); color: var(--ink-3); }
-.seeds { font: 12px/1.6 var(--mono); color: var(--ink-3); }
+.seeds { font: 13px/1.6 var(--mono); color: var(--ink-3); }
 .seeds b { color: var(--ink-2); font-weight: 600; }
 
-table.mini { width: 100%; border-collapse: collapse; font: 12px/1.5 var(--mono); }
+table.mini { width: 100%; border-collapse: collapse; font: 13px/1.5 var(--mono); }
 table.mini th {
   padding: 0 0 5px 14px; text-align: right; border-bottom: 1px solid var(--rule);
-  font-size: 10px; letter-spacing: 0.1em; color: var(--ink-3); font-weight: 600;
+  font-size: 10px; letter-spacing: 0.03em; color: var(--ink-3); font-weight: 600;
 }
 table.mini th:first-child, table.mini td:first-child { text-align: left; padding-left: 0; }
 table.mini td { padding: 6px 0 6px 14px; text-align: right; border-bottom: 1px solid var(--rule-2); }
@@ -531,20 +533,20 @@ table.mini tr:last-child td { border-bottom: 0; }
 .sec { padding: 20px 0 22px; border-bottom: 1px solid var(--rule); }
 .sec.dirty > .block-head h3 { color: var(--signal); }
 .sec.dirty textarea { border-color: var(--signal); }
-.sec .flag { margin-left: 8px; font: 600 10.5px/1 var(--mono); letter-spacing: 0.1em; color: var(--signal); }
+.sec .flag { margin-left: 8px; font: 700 12px/1 var(--mono); letter-spacing: 0.03em; color: var(--signal); }
 .picker {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 14px; margin: 10px 0; padding: 12px;
   border: 1px solid var(--rule); background: var(--paper-2);
 }
-.picker h5 { font: 600 10px/1.4 var(--mono); letter-spacing: 0.14em; color: var(--ink-3); margin-bottom: 5px; }
-.pick { display: flex; gap: 7px; align-items: baseline; padding: 2px 0; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.picker h5 { font: 700 11.5px/1.4 var(--mono); letter-spacing: 0.04em; color: var(--ink-3); margin-bottom: 5px; }
+.pick { display: flex; gap: 7px; align-items: baseline; padding: 2px 0; font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
 .pick:hover { color: var(--ink); }
 .pick input { width: auto; accent-color: var(--signal); }
 .pick b { font: 600 11.5px/1 var(--mono); color: var(--ink); }
 .refs { margin: 8px 0 2px; padding: 8px 12px 8px 28px; border-left: 2px solid var(--rule-strong); }
-.refs li { margin: 3px 0; color: var(--ink-2); font-size: 12.5px; }
-details > summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); padding: 5px 0; user-select: none; }
+.refs li { margin: 3px 0; color: var(--ink-2); font-size: 13.5px; }
+details > summary { cursor: pointer; font-size: 13.5px; color: var(--ink-2); padding: 5px 0; user-select: none; }
 details > summary:hover { color: var(--ink); }
 
 /* ---------- 空状态：一句话 + 一个动作，不画插画 ---------- */
@@ -581,9 +583,9 @@ details > summary:hover { color: var(--ink); }
 }
 .p-item:last-child { border-bottom: 0; }
 .p-item.on { background: var(--signal-bg); }
-.p-kind { font: 600 10px/1.6 var(--mono); letter-spacing: 0.1em; color: var(--ink-3); }
+.p-kind { font: 600 10px/1.6 var(--mono); letter-spacing: 0.03em; color: var(--ink-3); }
 .p-text { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p-sub { font: 11px/1.5 var(--mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-sub { font: 13.5px/1.5 var(--mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-foot {
   display: flex; gap: 16px; padding: 7px 16px;
   border-top: 1px solid var(--rule); background: var(--paper-2);
@@ -599,7 +601,7 @@ details > summary:hover { color: var(--ink); }
   max-width: min(460px, calc(100vw - 40px));
   padding: 10px 16px;
   background: var(--ink); color: var(--paper);
-  font-size: 12.5px;
+  font-size: 13.5px;
   opacity: 0; pointer-events: none;
   transition: opacity 0.16s, transform 0.16s;
 }
@@ -667,16 +669,16 @@ details > summary:hover { color: var(--ink); }
 .col-src { text-align: left !important; color: var(--ink-3); }
 /* 第一列是勾选框，run 落到第二列——台账的第一列永远左对齐。 */
 table.pick-table td:nth-child(2), table.pick-table th:nth-child(2) { text-align: left; }
-table.ledger td.col-src { font-size: 11.5px; }
-.rule-head .tally { font: 11.5px/1.6 var(--mono); color: var(--ink-3); }
-table.ledger td input { padding: 4px 7px; font-size: 12.5px; }
+table.ledger td.col-src { font-size: 12.5px; }
+.rule-head .tally { font: 13px/1.6 var(--mono); color: var(--ink-3); }
+table.ledger td input { padding: 4px 7px; font-size: 13.5px; }
 
 /* ---------- AI 的判断 ---------- */
 
 .advice { padding: 14px 0 4px; display: grid; gap: 16px; }
 .advice-block h4 {
-  font: 600 10px/1.4 var(--mono); letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--ink-3); margin-bottom: 7px;
+  font: 700 11.5px/1.4 var(--mono); letter-spacing: 0.05em;
+  color: var(--ink-3); margin-bottom: 7px;
 }
 .advice .rank { margin: 0 0 8px; padding-left: 20px; font: 12.5px/1.9 var(--mono); color: var(--ink-2); }
 /* 与实测排序不一致的位次——分歧本身就是有信息量的信号。 */

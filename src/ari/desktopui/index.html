@@ -3,33 +3,37 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>Ariadne</title>
     <style>/*__ARIADNE_CSS__*/</style>
   </head>
   <body>
     <main class="launcher">
-      <section class="intro">
-        <div class="brand"><span>A</span><strong>Ariadne</strong></div>
-        <div class="thread" aria-hidden="true"><i></i><i></i><i></i></div>
-        <p class="eyebrow">RESEARCH STARTS WITH A QUESTION</p>
-        <h1>从一个研究目录开始。</h1>
-        <p class="lead">每个文件夹就是一个独立项目。实验预测、结果、复盘与信念都会留在你选择的目录里。</p>
-        <div class="privacy"><b>●</b><span>本地优先</span> · 不上传你的实验数据</div>
-      </section>
+      <div class="brand"><i aria-hidden="true">§</i><strong>Ariadne</strong><span>实验台账</span></div>
 
-      <section class="projects">
-        <div>
-          <p class="eyebrow">YOUR WORKSPACE</p>
-          <h2>打开研究项目</h2>
-          <p class="help">选择已有 Ariadne 项目，或选择一个空文件夹开始新项目。</p>
-        </div>
-        <button id="choose-project" class="primary"><span>⌁</span><div><strong>选择研究目录</strong><small>打开或创建项目</small></div><b>→</b></button>
-        <div id="message" class="message" hidden></div>
-        <div id="recent-section" hidden>
-          <div class="recent-title"><span>最近打开</span><i></i></div>
-          <div id="recent-list" class="recent-list"></div>
-        </div>
-      </section>
+      <h1>从一个研究目录开始。</h1>
+      <p class="lead">
+        每个文件夹就是一个独立项目。调研、预测、结果、复盘与信念都留在你选择的目录里，
+        <b>以一份只追加的 <span class="num">runs.jsonl</span> 为唯一真相</b>——删掉派生的看板随时能重建，不丢数据。
+      </p>
+
+      <p class="loop">
+        <b>调研</b><i>→</i><b>想法</b><i>→</i><b>预测</b><i>→</i><b>结果</b><i>→</i><b>判定</b><i>→</i><b>复盘</b><i>→</i><b>论文</b>
+      </p>
+
+      <div class="rule-head"><span>打开研究项目</span></div>
+      <p class="help">选择已有的 Ariadne 项目，或选择一个空文件夹开始新项目。</p>
+      <button id="choose-project" class="primary">
+        <strong>选择研究目录</strong><small>打开或创建</small>
+      </button>
+      <div id="message" class="message" hidden></div>
+
+      <div id="recent-section" hidden>
+        <div class="rule-head"><span>最近打开</span></div>
+        <div id="recent-list" class="recent-list"></div>
+      </div>
+
+      <p class="privacy"><b>●</b>本地优先 · 不上传你的实验数据</p>
     </main>
     <script>/*__ARIADNE_JS__*/</script>
   </body>

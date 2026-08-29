@@ -37,7 +37,7 @@ async function openRecent(path, button) {
 
 function renderRecent(projects) {
   recentSection.hidden = !projects.length;
-  recentList.innerHTML = projects.map(project => `<button class="recent-project" data-path="${esc(project.path)}"><span>⌂</span><div><strong>${esc(project.name)}</strong><small>${esc(project.path)}</small></div><b>→</b></button>`).join("");
+  recentList.innerHTML = projects.map(project => `<button class="recent-project" data-path="${esc(project.path)}"><span><strong>${esc(project.name)}</strong><small>${esc(project.path)}</small></span><b>→</b></button>`).join("");
   recentList.querySelectorAll(".recent-project").forEach(button => {
     button.addEventListener("click", () => openRecent(button.dataset.path, button));
   });
