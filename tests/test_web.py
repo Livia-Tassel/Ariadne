@@ -822,3 +822,14 @@ def test_calibration_recent_deviations_are_newest_first(tmp_path):
 
     assert [row["batch"] for row in recent] == ["b2", "b1"]
     assert recent[0]["hot"] is True and recent[1]["hot"] is False
+
+
+def test_saving_a_paper_section_does_not_create_a_batch_warning(tmp_path):
+    service = GuiService(tmp_path / "p")
+    draft = service.create_draft({"title": "校准论文"})["draft"]
+
+    service.save_section(
+        {"draft": draft, "section": "discussion", "text": "正文", "materials": []}
+    )
+
+    assert service.state()["warnings"] == []

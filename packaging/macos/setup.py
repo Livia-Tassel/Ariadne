@@ -65,8 +65,8 @@ OPTIONS = {
         "CFBundleName": "Ariadne",
         "CFBundleDisplayName": "Ariadne",
         "CFBundleIdentifier": "ai.openai.ariadne",
-        "CFBundleShortVersionString": "0.3.0",
-        "CFBundleVersion": "3",
+        "CFBundleShortVersionString": "0.4.0",
+        "CFBundleVersion": "4",
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
         "NSHumanReadableCopyright": "Ariadne local-first research workspace",
@@ -75,7 +75,7 @@ OPTIONS = {
 
 setup(
     name="Ariadne",
-    version="0.3.0",
+    version="0.4.0",
     description="实验预测、记录与复盘桌面工作台",
     app=["Ariadne.py"],
     package_dir={"": "../../src"},

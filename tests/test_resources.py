@@ -37,3 +37,12 @@ def test_nested_asset_paths_resolve(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "executable", str(executable))
 
     assert "export const $" in asset_file("webui", "lib/dom.js").read_text(encoding="utf-8")
+
+
+def test_paper_materials_remain_structured_instead_of_being_injected_into_text():
+    source = asset_file("webui", "views/draft.js").read_text(encoding="utf-8")
+
+    assert "materialLabel(material)" in source
+    assert 'class="refs"' in source
+    assert "referenceText" not in source
+    assert "插入选中素材" not in source

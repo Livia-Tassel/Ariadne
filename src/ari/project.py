@@ -121,6 +121,7 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             or event.type.startswith("belief_")
             or event.type.startswith("idea_")
             or event.type.startswith("draft_")
+            or event.type == "section_saved"
         ):
             continue  # 信念/想法/草稿跨批次存活，由各自模块单独投影
 

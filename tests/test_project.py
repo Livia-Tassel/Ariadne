@@ -185,6 +185,32 @@ def test_batch_meta_revision_only_touches_given_fields():
     assert batches["b1"].result_path == "logs/old.json"
 
 
+def test_paper_events_do_not_leak_into_batch_warnings():
+    """论文事件属于独立投影，保存章节不能伪装成「未开启批次」事件。"""
+    batches, warnings = project(
+        [
+            Event(
+                ts="2026-08-23T11:00:00+08:00",
+                type="draft_opened",
+                payload={"draft": "p1", "title": "论文"},
+            ),
+            Event(
+                ts="2026-08-23T11:01:00+08:00",
+                type="section_saved",
+                payload={"draft": "p1", "section": "intro", "text": "正文"},
+            ),
+            Event(
+                ts="2026-08-23T11:02:00+08:00",
+                type="draft_status_changed",
+                payload={"draft": "p1", "status": "writing"},
+            ),
+        ]
+    )
+
+    assert batches == {}
+    assert warnings == []
+
+
 def test_surprise_run_needs_its_own_reflection_to_close():
     events = [
         make_batch_opened(),

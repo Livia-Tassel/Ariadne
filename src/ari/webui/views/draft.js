@@ -8,7 +8,7 @@
 
 import { $, $$, html, raw } from "../lib/dom.js";
 import { post, submitting, toast } from "../lib/api.js";
-import { VERDICT, dateLabel, fmt, fmtPrediction } from "../lib/fmt.js";
+import { dateLabel } from "../lib/fmt.js";
 import { refresh, store } from "../lib/store.js";
 
 const STASH = (draftId, section) => `ariadne-stash:${draftId}:${section}`;
@@ -40,39 +40,6 @@ function materialLabel(material) {
     return `想法 ${material.idea}：${idea ? idea.text : "（已不存在）"}`;
   }
   return "未知素材";
-}
-
-/** 引用展开成 Markdown。数字与判定都带上，写作时不用回头翻表。 */
-function referenceText(material) {
-  if (material.batch) {
-    const batch = store.state.batches.find((item) => item.id === material.batch);
-    if (!batch) return `- 批次 ${material.batch}（数据已不存在）`;
-    const lines = [`**批次 ${batch.id}**：${batch.hypothesis}`];
-    if (batch.research_direction) lines.push(`（方向：${batch.research_direction}）`);
-    for (const run of batch.runs) {
-      const verdict =
-        run.closed && run.verdict === "SURPRISE" ? "已复盘的意外" : VERDICT[run.verdict] || run.verdict;
-      const predicted = Object.entries(run.prediction?.metrics || {})
-        .map(([name, value]) => `${name} ${fmtPrediction(value)}`)
-        .join("，");
-      const actual = Object.entries(run.aggregates || {})
-        .map(([name, agg]) => `${name} ${fmt(agg.mean)}±${agg.sd === null ? "?" : fmt(agg.sd)}(n=${agg.n})`)
-        .join("，");
-      lines.push(`- \`${run.run}\`：预测 ${predicted || "—"}；实测 ${actual || "—"}（${verdict}）`);
-    }
-    return lines.join("\n");
-  }
-  if (material.belief) {
-    const belief = store.state.beliefs.find((item) => item.id === material.belief);
-    if (!belief) return `- 信念 ${material.belief}（已不存在）`;
-    return `- 信念（${belief.status}）：${belief.text} [${belief.id}]`;
-  }
-  if (material.idea) {
-    const idea = store.state.ideas.find((item) => item.id === material.idea);
-    if (!idea) return `- 想法 ${material.idea}（已不存在）`;
-    return `- 研究起点：${idea.text}${idea.motivation ? `（${idea.motivation}）` : ""} [${idea.id}]`;
-  }
-  return "";
 }
 
 function pickerHtml(section) {
@@ -113,19 +80,22 @@ function pickerHtml(section) {
 function sectionHtml(draft, name, label) {
   const section = draft.sections.find((item) => item.name === name);
   const saved = section?.saved_ts ? `上次保存 ${dateLabel(section.saved_ts)}` : "还没写过";
+  const materials = section?.materials || [];
   return html`<form class="sec" data-section="${name}">
     <div class="block-head">
       <div>
         <h3>${label}<span class="flag" hidden>未保存</span></h3>
         <p>${saved}</p>
       </div>
-      <button type="button" class="btn ghost sm insert">↧ 插入选中素材</button>
     </div>
     <div class="field">
       <textarea class="body prose" rows="${name === "abstract" ? 5 : 9}" placeholder="${label}……">${section?.text || ""}</textarea>
     </div>
     <details>
-      <summary>素材引用（${(section?.materials || []).length}）</summary>
+      <summary>素材引用（${materials.length}）</summary>
+      ${materials.length
+        ? html`<ul class="refs">${materials.map((material) => html`<li>${materialLabel(material)}</li>`)}</ul>`
+        : ""}
       ${pickerHtml(section)}
     </details>
     <div class="acts left"><button type="submit" class="btn sm">保存这一节</button></div>
@@ -200,25 +170,6 @@ function bindDraft(draft) {
 
   for (const form of $$("#sections .sec")) {
     $(".body", form).addEventListener("input", () => markDirty(form, true));
-
-    $(".insert", form).onclick = () => {
-      const area = $(".body", form);
-      const checked = $$(".pick input:checked", form);
-      if (!checked.length) {
-        toast("先在「素材引用」里勾选要引用的批次或信念");
-        return;
-      }
-      const text = checked
-        .map((input) => {
-          const [kind, id] = input.value.split(":");
-          return referenceText({ [kind]: id });
-        })
-        .join("\n\n");
-      area.value = area.value.trimEnd() ? `${area.value.trimEnd()}\n\n${text}\n` : `${text}\n`;
-      markDirty(form, true);
-      area.focus();
-      area.selectionStart = area.value.length;
-    };
 
     form.onsubmit = async (event) => {
       event.preventDefault();
