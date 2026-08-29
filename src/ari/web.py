@@ -385,6 +385,49 @@ class GuiService:
             lambda: probe(self.root, batches, run), "ai_probe", batch=batch_id, run=run_key
         )
 
+    def revise_prediction(self, payload: dict) -> dict:
+        """修订一个 run 的预测。原值永远保留。
+
+        锁错了值不该只能去手改 runs.jsonl。但事件流只追加不修改：修订写
+        一条 prediction_revised，投影层把原值挪进 original_prediction 并
+        标记 revised。结果已经在库时还会额外留一条 revised_after_result。
+        """
+        batch_id = _text(payload.get("batch"), "批次")
+        run_key = _text(payload.get("run"), "run")
+        _, _, batches, _, _, _, _, _ = self._load()
+        batch = batches.get(batch_id)
+        if batch is None:
+            raise GuiInputError(f"找不到批次 {batch_id}", 404)
+        run = batch.runs.get(run_key)
+        if run is None:
+            # 渐进锁定下「还没有任何事件」是常态，与「不属于这个批次」是
+            # 两回事，报同一句话会让人以为 run key 写错了。
+            if run_key in set(expand_runs(batch.dimensions)):
+                raise GuiInputError(f"{run_key} 还没有预测，先锁定再谈修订")
+            raise GuiInputError(f"{run_key} 不属于批次 {batch_id}", 404)
+        if run.prediction is None:
+            raise GuiInputError(f"{run_key} 还没有预测，先锁定再谈修订")
+        if batch.closed:
+            raise GuiInputError(f"批次 {batch_id} 已收口，不再接受修订")
+
+        metric_names = self._batch_metric_names(batch) or list(batch.metric_specs)
+        body = self._predictions(
+            [{"run": run_key, **payload}], [run_key], metric_names, complete=False
+        )[run_key]
+
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=_now(),
+                    type="prediction_revised",
+                    batch=batch_id,
+                    run=run_key,
+                    payload=body,
+                ),
+            )
+        return {"ok": True, "batch": batch_id, "run": run_key}
+
     def discover_results(self, payload: dict) -> dict:
         """按 result_path 模板扫出结果文件并解析，**不写盘**。
 
@@ -1496,6 +1539,7 @@ class GuiService:
                     "closed": run.closed,
                     "revised": run.revised,
                     "prediction": run.prediction,
+                    "original_prediction": run.original_prediction,
                     "samples": {name: values for name, values in run.samples.items()},
                     "aggregates": {
                         name: {"mean": agg.mean, "sd": agg.sd, "n": agg.n}
@@ -1531,6 +1575,7 @@ class GuiService:
             "dimensions": batch.dimensions,
             "metrics": metric_names,
             "metric_specs": batch.metric_specs,
+            "expected_ranking": batch.expected_ranking,
             # 变量组合展开后的 run 总数。runs 只含有事件的 run，unlocked 只含
             # 没预测的——一个有结果但没锁预测的 run 会同时出现在两边，相加会重。
             "advice": notes.get("advice"),
@@ -1557,6 +1602,7 @@ _POST_ROUTES = {
     "/api/batches": "create_batch",
     "/api/batches/meta": "revise_batch_meta",
     "/api/predictions": "lock_predictions",
+    "/api/predictions/revise": "revise_prediction",
     "/api/surveys": "create_survey",
     "/api/surveys/run": "run_survey",
     "/api/surveys/read": "read_paper",

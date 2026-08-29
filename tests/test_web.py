@@ -1023,3 +1023,68 @@ def test_citing_an_unknown_survey_is_refused(tmp_path):
         service.save_section(
             {"draft": "p1", "section": "related", "text": "", "materials": [{"survey": "s9"}]}
         )
+
+
+def test_a_prediction_can_be_revised_and_keeps_the_original(tmp_path):
+    """锁错了值不该只能去手改 runs.jsonl。原值永远保留。"""
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+
+    service.revise_prediction(
+        {
+            "batch": "b1",
+            "run": "model=large",
+            "metrics": {"top1_acc": "0.86"},
+            "confidence": "low",
+            "rationale": "看错了 baseline，重新估",
+        }
+    )
+
+    run = next(r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=large")
+    assert run["revised"] is True
+    assert run["prediction"]["metrics"]["top1_acc"] == 0.86
+    assert run["original_prediction"]["metrics"]["top1_acc"] == 0.83
+
+
+def test_revising_after_results_are_in_is_allowed_but_marked(tmp_path):
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+    _add_results(service)
+
+    service.revise_prediction(
+        {"batch": "b1", "run": "model=large", "metrics": {"top1_acc": "0.95"}, "rationale": "马后炮"}
+    )
+
+    run = next(r for r in service.state()["batches"][0]["runs"] if r["run"] == "model=large")
+    assert "revised_after_result" in run["integrity"]
+
+
+def test_revising_a_run_with_no_prediction_is_refused(tmp_path):
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+
+    with pytest.raises(GuiInputError, match="还没有预测"):
+        service.revise_prediction(
+            {"batch": "b1", "run": "model=base", "metrics": {"top1_acc": "0.8"}, "rationale": "x"}
+        )
+
+
+def test_expected_ranking_can_be_filled_in_after_the_batch_is_open(tmp_path):
+    """v0.4 把它从写死的 None 解放了，但界面上一直填不了——API 有、入口没有。"""
+    service = GuiService(tmp_path / "p")
+    service.create_batch(_batch_payload())
+
+    service.revise_batch_meta(
+        {
+            "batch": "b1",
+            "expected_ranking": {"metric": "top1_acc", "order": ["model=large", "model=base"]},
+        }
+    )
+    _add_results(service)
+
+    batch = service.state()["batches"][0]
+    assert batch["expected_ranking"] == {
+        "metric": "top1_acc",
+        "order": ["model=large", "model=base"],
+    }
+    assert batch["ranking"] is not None

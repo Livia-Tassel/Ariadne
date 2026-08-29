@@ -187,6 +187,10 @@ def project(events: list[Event]) -> tuple[dict[str, BatchState], list[str]]:
             if run.prediction is None:
                 run.warnings.append(f"第 {event.line_no} 行：修订了不存在的预测，已忽略")
                 continue
+            if run.samples:
+                # 改预测本身合法，但在看到结果之后改，比迟到的首次预测更
+                # 值得留痕——那正是这个工具要防的那件事。
+                _flag(run, "revised_after_result")
             if run.original_prediction is None:
                 run.original_prediction = run.prediction
             run.prediction = event.payload

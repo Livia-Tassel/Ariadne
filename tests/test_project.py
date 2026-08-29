@@ -356,3 +356,46 @@ def test_survey_events_do_not_disturb_the_batch_projection():
 
     assert warnings == []
     assert set(batches) == {"b1"}
+
+
+def test_revising_a_prediction_after_results_are_in_is_flagged():
+    """改预测本身合法——prediction_revised 就是为此存在的。但在看到结果
+    之后改，比迟到的首次预测更值得留痕：那正是这个工具要防的那件事。"""
+    batches, _ = project(
+        [
+            make_batch_opened(),
+            make_prediction("model=large", {"top1_acc": 0.830}),
+            make_result("model=large", {"top1_acc": 0.950}),
+            Event(
+                ts="2026-08-23T14:00:00+08:00",
+                type="prediction_revised",
+                batch="b1",
+                run="model=large",
+                payload={"metrics": {"top1_acc": 0.95}, "rationale": "改成实测值"},
+            ),
+        ]
+    )
+
+    run = batches["b1"].runs["model=large"]
+    assert "revised_after_result" in run.integrity
+    assert run.revised is True
+    assert run.original_prediction["metrics"]["top1_acc"] == 0.830
+
+
+def test_revising_before_any_result_is_not_flagged():
+    batches, _ = project(
+        [
+            make_batch_opened(),
+            make_prediction("model=large", {"top1_acc": 0.830}),
+            Event(
+                ts="2026-08-23T10:30:00+08:00",
+                type="prediction_revised",
+                batch="b1",
+                run="model=large",
+                payload={"metrics": {"top1_acc": 0.84}, "rationale": "又想了想"},
+            ),
+            make_result("model=large", {"top1_acc": 0.841}),
+        ]
+    )
+
+    assert batches["b1"].runs["model=large"].integrity == []

@@ -712,3 +712,6 @@ table.ledger td input { padding: 4px 7px; font-size: 13.5px; }
   color: var(--ink-3); font-size: 13px; text-align: left; padding-left: 10px;
 }
 .tail-toggle:hover { color: var(--signal); background: var(--paper-2); }
+.revise { margin-top: 6px; }
+.revise > summary { font-size: 13px; color: var(--ink-3); }
+.revise > summary:hover { color: var(--signal); }

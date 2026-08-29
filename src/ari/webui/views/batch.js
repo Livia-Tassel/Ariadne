@@ -13,13 +13,21 @@ import {
   fmt,
   fmtActualAt,
   fmtDeviation,
+  fmtPrediction,
   fmtPredictionAt,
   decimalsFor,
   runSeeds,
 } from "../lib/fmt.js";
 import { findBatch, store } from "../lib/store.js";
 import { chartsHtml } from "../parts/chart.js";
-import { bindForms, closeHtml, resultFormHtml, reviewFormHtml } from "../parts/forms.js";
+import {
+  bindForms,
+  closeHtml,
+  rankingFormHtml,
+  resultFormHtml,
+  reviseFormHtml,
+  reviewFormHtml,
+} from "../parts/forms.js";
 import { bindResults, resultsSectionHtml } from "../parts/results.js";
 import { bindLock, lockSectionHtml } from "../parts/predict.js";
 import { adviceSectionHtml, bindAdvice, bindProbe, probeHtml } from "../parts/advice.js";
@@ -156,12 +164,25 @@ function panelHtml(batch, run) {
     action = resultFormHtml(batch, run);
   }
 
+  const revise = run.prediction && !run.closed ? reviseFormHtml(batch, run) : "";
+  const original = run.original_prediction
+    ? html`<div>
+        <h4>原来的预测</h4>
+        <p class="quote">
+          ${Object.entries(run.original_prediction.metrics || {})
+            .map(([name, value]) => `${name} ${fmtPrediction(value)}`)
+            .join("，")}
+          <span class="meta">${run.original_prediction.rationale || ""}</span>
+        </p>
+      </div>`
+    : "";
+
   return html`<div class="panel">
     ${integrity}${detail}
     <p class="seeds">
       ${seeds.length ? html`已录入 seed <b>${seeds.join("、")}</b>` : "还没有结果——实验跑完后在这里录入。"}
     </p>
-    ${rationale}${action}${reflection}
+    ${rationale}${original}${action}${revise}${reflection}
   </div>`;
 }
 
@@ -252,6 +273,7 @@ export function renderBatch() {
       </tbody>
     </table>
 
+    ${rankingFormHtml(batch)}
     ${lockSectionHtml(batch)}
     ${adviceSectionHtml(batch)}
     ${resultsSectionHtml(batch)}

@@ -7,7 +7,7 @@
 
 import { $, $$, html } from "../lib/dom.js";
 import { post, submitting, toast } from "../lib/api.js";
-import { nextSeed, runSeeds } from "../lib/fmt.js";
+import { decimalsFor, fmtFixed, nextSeed, runSeeds } from "../lib/fmt.js";
 import { refresh, store } from "../lib/store.js";
 
 /* ---------- 录结果 ---------- */
@@ -38,7 +38,78 @@ export function resultFormHtml(batch, run) {
   </form>`;
 }
 
-/* ---------- 复盘 ---------- */
+/* ---------- 修订预测 ---------- */
+
+export function reviseFormHtml(batch, run) {
+  const dp = decimalsFor(batch.metric_specs?.[batch.metrics[0]]);
+  const hasResult = Object.keys(run.aggregates || {}).length > 0;
+  return html`<details class="revise">
+    <summary>修订这条预测</summary>
+    <form class="inline-form revise-form" data-run="${run.run}">
+      ${hasResult
+        ? html`<div class="note hot">
+            结果已经在库了。改预测本身合法，但这条记录会永久带上「看到结果之后改过」——
+            那正是这个工具要防的那件事。原值也会保留。
+          </div>`
+        : html`<p class="seeds">原值会保留在账本里，不会被覆盖。</p>`}
+      <div class="inline-grid">
+        ${batch.metrics.map(
+          (name) => html`<div class="field">
+            <label>${name} 新预测</label>
+            <input class="rv-val mono" data-metric="${name}" placeholder="${fmtFixed(0, dp)} 或区间" required />
+          </div>`,
+        )}
+        <div class="field narrow">
+          <label>置信度</label>
+          <select class="rv-conf">
+            <option value="low">低</option>
+            <option value="medium" selected>中</option>
+            <option value="high">高</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>为什么要改？<span class="hint">（必填——三个月后你会想知道）</span></label>
+        <input class="rv-why" placeholder="例如：看错了 baseline 的数据集划分" required />
+      </div>
+      <div class="acts left"><button type="submit" class="btn sm">修订</button></div>
+      <div class="err" hidden></div>
+    </form>
+  </details>`;
+}
+
+/* ---------- 预期排序 ---------- */
+
+export function rankingFormHtml(batch) {
+  if (batch.closed) return "";
+  const runs = [...batch.runs.map((r) => r.run), ...(batch.unlocked || [])];
+  if (runs.length < 2) return "";
+  const current = batch.expected_ranking;
+  return html`<details class="revise">
+    <summary>${current ? "改预期排序" : "声明预期排序（可选）"}</summary>
+    <form class="inline-form ranking-form">
+      <p class="seeds">
+        除了每个 run 的数值，你还可以预先声明「谁会赢」。排序判定独立于数值判定——
+        数值全落在容差内、但相对顺序反了，同样是意外。一行一个 run，从好到差。
+      </p>
+      <div class="inline-grid">
+        <div class="field">
+          <label>指标</label>
+          <select class="rk-metric">
+            ${batch.metrics.map((name) => html`<option value="${name}">${name}</option>`)}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>预期顺序<span class="hint">（一行一个，从好到差；可只列你有把握的几个）</span></label>
+        <textarea class="rk-order mono" rows="${Math.min(runs.length, 6)}"
+          placeholder="${runs.slice(0, 2).join("\n")}">${(current?.order || []).join("\n")}</textarea>
+      </div>
+      <div class="acts left"><button type="submit" class="btn sm">保存预期排序</button></div>
+      <div class="err" hidden></div>
+    </form>
+  </details>`;
+}
 
 function beliefRowsHtml() {
   const active = store.state.beliefs.filter((belief) => !belief.refuted);
@@ -156,6 +227,44 @@ export function bindForms(batchId) {
           belief_changes: changesIn(form),
         });
         toast("复盘已存下，这次意外进了知识记录");
+      });
+      if (ok) await refresh();
+    };
+  }
+
+  for (const form of $$("#batch-body form.revise-form")) {
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const ok = await submitting(form, async () => {
+        await post("/api/predictions/revise", {
+          batch: batchId,
+          run: form.dataset.run,
+          metrics: Object.fromEntries(
+            $$(".rv-val", form).map((input) => [input.dataset.metric, input.value.trim()]),
+          ),
+          confidence: $(".rv-conf", form).value,
+          rationale: $(".rv-why", form).value,
+        });
+        toast("预测已修订，原值保留在账本里");
+      });
+      if (ok) await refresh();
+    };
+  }
+
+  const rankingForm = $("#batch-body form.ranking-form");
+  if (rankingForm) {
+    rankingForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const order = $(".rk-order", rankingForm)
+        .value.split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const ok = await submitting(rankingForm, async () => {
+        await post("/api/batches/meta", {
+          batch: batchId,
+          expected_ranking: { metric: $(".rk-metric", rankingForm).value, order },
+        });
+        toast("预期排序已声明");
       });
       if (ok) await refresh();
     };
