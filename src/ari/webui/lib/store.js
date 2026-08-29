@@ -78,44 +78,11 @@ export function todos() {
   return items;
 }
 
-/** 最近的落差：只取意外，按批次新到旧。校准记录的种子。 */
-export function recentDeviations(limit = 8) {
-  const s = store.state;
-  if (!s) return [];
-  const out = [];
-  for (const batch of [...s.batches].reverse()) {
-    for (const run of batch.runs) {
-      for (const [name, judgement] of Object.entries(run.judgements || {})) {
-        if (judgement.deviation === null || judgement.deviation === undefined) continue;
-        if (!Number.isFinite(Number(judgement.deviation))) continue;
-        out.push({
-          batch: batch.id,
-          run: run.run,
-          metric: name,
-          deviation: Number(judgement.deviation),
-          hot: judgement.verdict === "SURPRISE",
-        });
-        if (out.length >= limit) return out;
-      }
-    }
-  }
-  return out;
-}
-
-/** 命中率：有判定的 run 里落在预期内的比例。 */
+/** 命中率。校准的完整算法在服务端（web._calibration），这里只取一个数
+    给顶栏用——前端不持有第二份真相。 */
 export function hitRate() {
-  const s = store.state;
-  let hit = 0;
-  let judged = 0;
-  for (const batch of s?.batches || []) {
-    for (const run of batch.runs) {
-      if (run.verdict === "CONFIRMED" || run.verdict === "SURPRISE") {
-        judged += 1;
-        if (run.verdict === "CONFIRMED") hit += 1;
-      }
-    }
-  }
-  return { hit, judged };
+  const cal = store.state?.calibration;
+  return { hit: cal?.hit ?? 0, judged: cal?.judged ?? 0 };
 }
 
 export const findBatch = (id) => store.state?.batches.find((batch) => batch.id === id);

@@ -728,3 +728,97 @@ def test_state_exposes_archived_ai_notes(tmp_path, monkeypatch):
 
     batch = service.state()["batches"][0]
     assert batch["advice"]["ranking"] == ["model=large", "model=base"]
+
+
+# ---------- 校准记录 ----------
+
+def _judged_batch(service, rows):
+    """建一个批次并录入结果。rows: [(run, 预测, 置信度, 实测)]"""
+    payload = _batch_payload()
+    payload["dimensions"] = [{"name": "model", "values": [r[0] for r in rows]}]
+    payload["predictions"] = [
+        {
+            "run": f"model={run}",
+            "metrics": {"top1_acc": predicted},
+            "confidence": confidence,
+            "rationale": "理由",
+        }
+        for run, predicted, confidence, _ in rows
+    ]
+    created = service.create_batch(payload)
+    service.add_results(
+        {
+            "batch": created["batch"],
+            "rows": [
+                {"run": f"model={run}", "seed": 0, "metrics": {"top1_acc": actual}}
+                for run, _, _, actual in rows
+            ],
+        }
+    )
+    return created["batch"]
+
+
+def test_calibration_counts_hits_and_signed_bias(tmp_path):
+    """命中率之外还要给带符号偏差：一直高估和一直低估是两种不同的毛病。"""
+    service = GuiService(tmp_path / "p")
+    _judged_batch(
+        service,
+        [
+            ("a", "0.800", "high", 0.801),   # 命中，+0.001
+            ("b", "0.800", "high", 0.900),   # 意外，+0.100（低估了）
+        ],
+    )
+
+    cal = service.state()["calibration"]
+
+    assert cal["judged"] == 2
+    assert cal["hit"] == 1
+    assert cal["bias"] == pytest.approx(0.0505, abs=1e-4)
+
+
+def test_calibration_breaks_down_by_stated_confidence(tmp_path):
+    """最有价值的一问：你说「高」的时候，真的更准吗？
+
+    如果 high 的命中率并不比 low 好，那这个置信度字段就是噪声。
+    """
+    service = GuiService(tmp_path / "p")
+    _judged_batch(
+        service,
+        [
+            ("a", "0.800", "high", 0.801),
+            ("b", "0.800", "high", 0.802),
+            ("c", "0.800", "low", 0.900),
+        ],
+    )
+
+    levels = {row["level"]: row for row in service.state()["calibration"]["by_confidence"]}
+
+    assert levels["high"]["judged"] == 2 and levels["high"]["hit"] == 2
+    assert levels["low"]["judged"] == 1 and levels["low"]["hit"] == 0
+    assert "medium" not in levels  # 一条都没有的档次不占位置
+
+
+def test_calibration_ignores_runs_that_cannot_be_judged(tmp_path):
+    """没有结果、噪声过大、预测缺席的 run 都不进校准——它们没有对错可言。"""
+    service = GuiService(tmp_path / "p")
+    _bare_batch(service)
+    service.add_results(
+        {"batch": "b1", "rows": [{"run": "model=base", "seed": 0, "metrics": {"top1_acc": 0.81}}]}
+    )
+
+    cal = service.state()["calibration"]
+
+    assert cal["judged"] == 0
+    assert cal["bias"] is None
+    assert cal["by_confidence"] == []
+
+
+def test_calibration_recent_deviations_are_newest_first(tmp_path):
+    service = GuiService(tmp_path / "p")
+    _judged_batch(service, [("a", "0.800", "high", 0.801)])
+    _judged_batch(service, [("b", "0.700", "low", 0.900)])
+
+    recent = service.state()["calibration"]["recent"]
+
+    assert [row["batch"] for row in recent] == ["b2", "b1"]
+    assert recent[0]["hot"] is True and recent[1]["hot"] is False

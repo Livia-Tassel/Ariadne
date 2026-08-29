@@ -570,6 +570,62 @@ class GuiService:
                 slot["probes"][event.run] = event.payload.get("probe")
         return notes
 
+    @staticmethod
+    def _calibration(batches) -> dict:
+        """你自己的预测准不准。
+
+        这是整个工具存在的理由：不是记账，是让你看见自己的判断在哪个方向上
+        系统性地���。所以除了命中率还给两样：
+
+        bias —— 带符号偏差的均值。一直高估和一直低估是两种不同的毛病，
+        绝对值平均会把它们抵消掉，正好抹掉最有用的那个信号。
+
+        by_confidence —— 你说「高」的时候是不是真的更准。如果 high 的命中率
+        并不比 low 好，那这个置信度字段就是噪声，不如不填。
+
+        只统计能判定的 run：没结果、噪声过大、预测缺席的都没有对错可言。
+        """
+        judged = hit = 0
+        deviations: list[float] = []
+        by_level: dict[str, dict] = {}
+        recent: list[dict] = []
+
+        for batch in reversed(list(batches.values())):
+            for run in batch.runs.values():
+                if run.verdict not in (Verdict.CONFIRMED, Verdict.SURPRISE):
+                    continue
+                judged += 1
+                level = (run.prediction or {}).get("confidence") or "medium"
+                slot = by_level.setdefault(level, {"level": level, "judged": 0, "hit": 0})
+                slot["judged"] += 1
+                if run.verdict is Verdict.CONFIRMED:
+                    hit += 1
+                    slot["hit"] += 1
+                for name, judgement in run.metric_judgements.items():
+                    value = judgement.deviation
+                    if value is None:
+                        continue  # 区间预测没有点偏差
+                    deviations.append(value)
+                    if len(recent) < 12:
+                        recent.append(
+                            {
+                                "batch": batch.id,
+                                "run": run.run,
+                                "metric": name,
+                                "deviation": value,
+                                "hot": judgement.verdict is Verdict.SURPRISE,
+                            }
+                        )
+
+        order = {"high": 0, "medium": 1, "low": 2}
+        return {
+            "judged": judged,
+            "hit": hit,
+            "bias": (sum(deviations) / len(deviations)) if deviations else None,
+            "by_confidence": sorted(by_level.values(), key=lambda row: order.get(row["level"], 9)),
+            "recent": recent,
+        }
+
     def state(self) -> dict:
         events, parse_errors, batches, warnings, ledger, ideas, drafts = self._load()
         notes = self._ai_notes(events)
@@ -629,6 +685,7 @@ class GuiService:
                 "open_ideas": open_ideas,
                 "drafts": len(drafts),
             },
+            "calibration": self._calibration(batches),
             "batches": serialized_batches,
             "pending_reviews": pending_runs,
             "beliefs": beliefs,
