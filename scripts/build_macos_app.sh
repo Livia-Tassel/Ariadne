@@ -30,8 +30,21 @@ cd "$ROOT/packaging/macos"
 
 # iCloud/File Provider 工作区可能给新 bundle 继承 FinderInfo，严格签名校验会拒绝。
 xattr -cr "$ROOT/dist/Ariadne.app"
-xattr -d com.apple.FinderInfo "$ROOT/dist/Ariadne.app" 2>/dev/null || true
-xattr -d 'com.apple.fileprovider.fpfs#P' "$ROOT/dist/Ariadne.app" 2>/dev/null || true
-codesign --force --deep --sign - "$ROOT/dist/Ariadne.app" >/dev/null
+signed=0
+attempt=0
+while [ "$attempt" -lt 5 ]; do
+    xattr -d com.apple.FinderInfo "$ROOT/dist/Ariadne.app" 2>/dev/null || true
+    xattr -d 'com.apple.fileprovider.fpfs#P' "$ROOT/dist/Ariadne.app" 2>/dev/null || true
+    if codesign --force --deep --sign - "$ROOT/dist/Ariadne.app" >/dev/null 2>&1; then
+        signed=1
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+done
+if [ "$signed" -ne 1 ]; then
+    echo "应用已构建，但本地文件提供器反复写入 FinderInfo，无法完成 ad-hoc 签名。" >&2
+    exit 1
+fi
 
 echo "构建完成：$ROOT/dist/Ariadne.app"
