@@ -252,3 +252,17 @@ def test_an_event_for_an_unknown_paper_is_warned_not_fatal():
 
     assert surveys["s1"].papers == {}
     assert len(warnings) == 1 and "不在调研" in warnings[0]
+
+
+def test_fetch_budget_is_recorded_so_it_survives_a_refresh():
+    """额度刷新一次就没了的话，界面上那行数字没有意义。"""
+    surveys, _ = project_surveys(
+        [
+            _opened(),
+            _event("survey_fetched", {"found": 50, "seed": 40, "budget_remaining": 729,
+                                      "budget_limit": 1000, "budget_reset": 69284}),
+        ]
+    )
+
+    assert surveys["s1"].budget == {"remaining": 729, "limit": 1000, "reset": 69284}
+    assert surveys["s1"].fetched_ts

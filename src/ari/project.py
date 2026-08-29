@@ -40,6 +40,7 @@ _KNOWN_TYPES = {
     "draft_status_changed",
     # 调研跨批次存活，由 surveys.py 单独投影。
     "survey_opened",
+    "survey_fetched",
     "paper_found",
     "paper_tiered",
     "paper_read",

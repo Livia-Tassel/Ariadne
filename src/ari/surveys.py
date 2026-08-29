@@ -105,6 +105,8 @@ class Survey:
     source: str = "openalex"
     opened_ts: str = ""
     papers: dict[str, PaperState] = field(default_factory=dict)
+    budget: dict | None = None
+    fetched_ts: str = ""
     bottleneck: str = ""
     bottleneck_ts: str = ""
     closed: bool = False
@@ -129,6 +131,7 @@ class Survey:
 
 _KNOWN = {
     "survey_opened",
+    "survey_fetched",
     "paper_found",
     "paper_tiered",
     "paper_read",
@@ -169,6 +172,14 @@ def project_surveys(events) -> tuple[dict[str, Survey], list[str]]:
             )
             continue
 
+        if event.type == "survey_fetched":
+            survey.fetched_ts = event.ts
+            survey.budget = {
+                "remaining": event.payload.get("budget_remaining"),
+                "limit": event.payload.get("budget_limit"),
+                "reset": event.payload.get("budget_reset"),
+            }
+            continue
         if event.type == "survey_bottleneck":
             survey.bottleneck = event.payload.get("text", "")
             survey.bottleneck_ts = event.ts

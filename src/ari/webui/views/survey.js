@@ -261,8 +261,19 @@ export function renderSurvey() {
     <p class="facts">
       <span>检索式 <b>${survey.query}</b></span>
       <span>来源 <b>OpenAlex</b></span>
+      ${survey.budget?.limit
+        ? html`<span>额度 <b>${survey.budget.remaining}/${survey.budget.limit}</b></span>`
+        : ""}
       ${survey.skipped ? html`<span>已跳过 <b>${survey.skipped}</b></span>` : ""}
     </p>
+    ${survey.closed
+      ? ""
+      : html`<div class="scan-line">
+          <span class="seeds">
+            再抓一批是「补充」不是「重来」：已经在账本里的论文不会被覆盖，人工改���的分层也保留。
+          </span>
+          <button type="button" class="btn ghost sm" id="refetch">再抓一批</button>
+        </div>`}
 
     <div class="rule-head">
       <h2>里程碑 —— 这几篇你该亲自读</h2>
@@ -362,6 +373,16 @@ function bindSurvey(survey) {
       } catch (error) {
         toast(error.message, true);
       }
+    };
+
+  const refetch = $("#refetch");
+  if (refetch)
+    refetch.onclick = async () => {
+      refetch.disabled = true;
+      refetch.textContent = "抓取中…";
+      await act("/api/surveys/run", { k: 40 }, (r) =>
+        r.found ? `补进 ${r.found} 篇` : "没有新的论文——这个检索式已经抓完了",
+      );
     };
 
   const toggle = $("#tail-toggle");

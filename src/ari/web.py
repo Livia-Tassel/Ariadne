@@ -628,6 +628,23 @@ class GuiService:
                 )
                 written += 1
 
+        # 额度进事件流：刷新一次就没了的话，界面上那行数字没有意义。
+        with self._write_lock:
+            append_event(
+                self.runs_path,
+                Event(
+                    ts=now,
+                    type="survey_fetched",
+                    batch=survey.id,
+                    payload={
+                        "found": written,
+                        "seed": len(seed),
+                        "budget_remaining": budget.remaining,
+                        "budget_limit": budget.limit,
+                        "budget_reset": budget.reset_seconds,
+                    },
+                ),
+            )
         return {
             "ok": True,
             "available": True,
@@ -868,6 +885,8 @@ class GuiService:
             "skipped": len([p for p in survey.papers.values() if p.skipped]),
             "unread_milestones": len(survey.unread_milestones),
             "ready_for_bottleneck": survey.ready_for_bottleneck,
+            "budget": survey.budget,
+            "fetched_at": survey.fetched_ts,
             "bottleneck": survey.bottleneck,
             "ai_bottleneck": notes.get("bottleneck"),
             "closed": survey.closed,

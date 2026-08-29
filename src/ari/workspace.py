@@ -25,6 +25,11 @@ api_key_env = "ANTHROPIC_API_KEY"
 reason = "anthropic:claude-opus-5"
 # 日志抽取，v0.2 未启用（见 spec §5.3）
 # extract = "openai:gpt-5.5"
+
+[openalex]
+# 领域调研的数据源。不需要 API key；填邮箱只是进入 OpenAlex 的礼貌池，
+# 不填也能用。限流是信用点制，界面上会显示剩余额度。
+mailto = ""
 """
 
 

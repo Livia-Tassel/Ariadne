@@ -36,6 +36,7 @@ export function initTheme() {
 const PAGES = [
   { label: "今天", sub: "待办与下一步", href: "#/" },
   { label: "新批次", sub: "设计并锁定预测", href: "#/new" },
+  { label: "调研", sub: "领域调研与分层阅读", href: "#/surveys" },
   { label: "批次", sub: "全部批次", href: "#/batches" },
   { label: "账本", sub: "想法与信念", href: "#/ledger" },
   { label: "论文", sub: "草稿列表", href: "#/paper" },
@@ -54,6 +55,23 @@ function entries() {
       sub: `${batch.id} · ${batch.closed ? "已收口" : "进行中"} · ${batch.research_direction || ""}`,
       href: `#/batch/${encodeURIComponent(batch.id)}`,
     });
+  }
+  for (const survey of s.surveys) {
+    rows.push({
+      kind: "调研",
+      text: survey.topic,
+      sub: `${survey.id} · ${survey.query}`,
+      href: `#/survey/${encodeURIComponent(survey.id)}`,
+    });
+    // 里程碑也进搜索：三个月后你只记得论文名，记不得它属于哪次调研。
+    for (const paper of survey.milestones) {
+      rows.push({
+        kind: "论文",
+        text: paper.title,
+        sub: `${survey.id} · ${paper.year || "年份不详"} · ${paper.read ? "已精读" : "待精读"}`,
+        href: `#/survey/${encodeURIComponent(survey.id)}`,
+      });
+    }
   }
   for (const idea of s.ideas) {
     rows.push({ kind: "想法", text: idea.text, sub: `${idea.id} · ${idea.status}`, href: "#/ledger" });
