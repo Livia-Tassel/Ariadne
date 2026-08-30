@@ -1,6 +1,6 @@
 [project]
 name = "ariadne-ra"
-version = "0.4.0"
+version = "0.5.0"
 description = "可独立运行的实验预测、记录与复盘桌面工作台"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,6 +9,7 @@ dependencies = [
     "PyYAML>=6.0",
     "anthropic>=1.0",
     "openai>=3.3",
+    "socksio>=1.0",
 ]
 
 [project.scripts]

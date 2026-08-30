@@ -177,7 +177,13 @@ function followupHtml(paper) {
         <button type="button" class="btn ghost sm drop-paper" data-work="${paper.work}">跳过</button>
       </span>
     </span>
-    <span class="st">${s ? "已摘要" : "未摘要"}</span>
+    <span class="st">
+      ${s
+        ? "已摘要"
+        : paper.abstract
+          ? html`<button type="button" class="btn ghost sm summarize-one" data-work="${paper.work}">AI 摘要</button>`
+          : "无原始摘要"}
+    </span>
   </div>`;
 }
 
@@ -246,7 +252,8 @@ export function renderSurvey() {
     return;
   }
 
-  const unsummarized = survey.followups.filter((p) => !p.summary).length;
+  const summarizable = survey.followups.filter((p) => !p.summary && p.abstract);
+  const missingAbstract = survey.followups.filter((p) => !p.summary && !p.abstract).length;
 
   body.innerHTML = html`
     <a class="crumb" href="#/surveys">← 调研</a>
@@ -270,7 +277,7 @@ export function renderSurvey() {
       ? ""
       : html`<div class="scan-line">
           <span class="seeds">
-            再抓一批是「补充」不是「重来」：已经在账本里的论文不会被覆盖，人工改���的分层也保留。
+            再抓一批是「补充」不是「重来」：已经在账本里的论文不会被覆盖，人工改过的分层也保留。
           </span>
           <button type="button" class="btn ghost sm" id="refetch">再抓一批</button>
         </div>`}
@@ -285,9 +292,11 @@ export function renderSurvey() {
 
     <div class="rule-head">
       <h2>长尾（${survey.followups.length}）—— AI 摘要，先不精读</h2>
-      ${unsummarized
-        ? html`<button type="button" class="btn ghost sm" id="summarize">摘要 ${Math.min(unsummarized, 12)} 篇</button>`
-        : html`<span class="tally">都摘要过了</span>`}
+      ${summarizable.length
+        ? html`<button type="button" class="btn ghost sm" id="summarize">
+            批量 AI 摘要 ${Math.min(summarizable.length, 12)} 篇
+          </button>`
+        : html`<span class="tally">${missingAbstract ? `可摘要的都完成 · ${missingAbstract} 篇无原始摘要` : "都摘要过了"}</span>`}
     </div>
     ${tailHtml(survey)}
 
@@ -331,13 +340,29 @@ function bindSurvey(survey) {
   for (const b of $$("#survey-body .drop-paper"))
     b.onclick = () => act("/api/surveys/skip", { work: b.dataset.work }, "已跳过");
 
+  for (const b of $$("#survey-body .summarize-one")) {
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = "摘要中…";
+      await act("/api/surveys/summarize", { works: [b.dataset.work] }, (r) =>
+        r.summarized ? "AI 摘要已生成" : `没能摘要：${r.reason}`,
+      );
+    };
+  }
+
   const summarize = $("#summarize");
   if (summarize) {
     summarize.onclick = async () => {
       summarize.disabled = true;
       summarize.textContent = "摘要中…";
-      await act("/api/surveys/summarize", {}, (r) =>
-        r.summarized ? `已摘要 ${r.summarized} 篇` : `没能摘要：${r.reason}`,
+      const works = survey.followups
+        .filter((paper) => !paper.summary && paper.abstract)
+        .slice(0, 12)
+        .map((paper) => paper.work);
+      await act("/api/surveys/summarize", { works }, (r) =>
+        r.summarized
+          ? `已摘要 ${r.summarized} 篇${r.failed ? `，${r.failed} 篇失败` : ""}`
+          : `没能摘要：${r.reason}`,
       );
     };
   }

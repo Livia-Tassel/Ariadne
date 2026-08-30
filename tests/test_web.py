@@ -910,6 +910,30 @@ def test_running_a_survey_twice_does_not_duplicate_papers(tmp_path, monkeypatch)
     assert len([e for e in service._load()[0] if e.type == "paper_found"]) == before
 
 
+def test_a_seed_that_is_also_a_milestone_is_written_once_and_stays_milestone(
+    tmp_path, monkeypatch
+):
+    """同一篇同时出现在搜索结果和里程碑回表里时，长尾不能覆盖里程碑。"""
+    service = GuiService(tmp_path / "p")
+    sid = service.create_survey({"topic": "x", "query": "y"})["survey"]
+    seed = [
+        _paper("FOUNDATION", refs=[]),
+        *[_paper(f"S{i}", refs=["FOUNDATION"]) for i in range(3)],
+    ]
+    _fake_openalex(monkeypatch, seed, [_paper("FOUNDATION", year=2014, cited=99)])
+
+    service.run_survey({"survey": sid})
+
+    found = [
+        event
+        for event in service._load()[0]
+        if event.type == "paper_found" and event.payload.get("work") == "FOUNDATION"
+    ]
+    survey = service.state()["surveys"][0]
+    assert len(found) == 1
+    assert {paper["work"] for paper in survey["milestones"]} == {"FOUNDATION"}
+
+
 def test_survey_degrades_quietly_when_openalex_is_unreachable(tmp_path, monkeypatch):
     """断网不报错、不阻断——与 LLM 层同一条约定。"""
     service = GuiService(tmp_path / "p")
@@ -948,6 +972,83 @@ def test_paper_can_be_retiered_by_hand(tmp_path, monkeypatch):
 
     survey = service.state()["surveys"][0]
     assert {p["work"] for p in survey["milestones"]} == {"FOUNDATION", "S0"}
+
+
+def test_one_followup_can_be_ai_summarized_on_demand(tmp_path, monkeypatch):
+    """每篇长尾都有独立入口，不必为了看一篇而启动整批。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+    seen = []
+
+    def fake_summary(root, title, abstract, milestones):
+        seen.append((title, abstract, milestones))
+        return {"changed": "只改了缓存淘汰策略", "worth_reading": False, "why": "核心假设没变"}
+
+    monkeypatch.setattr(web, "summarize_paper", fake_summary)
+
+    result = service.summarize_papers({"survey": sid, "works": ["S2"]})
+
+    assert result["summarized"] == 1
+    assert len(seen) == 1 and seen[0][0] == "论文 S2"
+    note = next(event for event in service._load()[0] if event.type == "note")
+    assert note.payload["kind"] == "ai_paper_summary"
+    assert note.payload["summary"]["changed"] == "只改了缓存淘汰策略"
+    assert "paper_summary" not in note.payload
+    paper = next(p for p in service.state()["surveys"][0]["followups"] if p["work"] == "S2")
+    assert paper["summary"] == {
+        "changed": "只改了缓存淘汰策略",
+        "worth_reading": False,
+        "why": "核心假设没变",
+    }
+
+
+def test_repeated_bulk_summary_continues_with_unsummarized_papers(tmp_path, monkeypatch):
+    """回归：第二次批量调用不能又从最前面的论文重新开始。"""
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+    seen = []
+
+    def fake_summary(root, title, abstract, milestones):
+        seen.append(title)
+        return {"changed": title, "worth_reading": False, "why": "测试"}
+
+    monkeypatch.setattr(web, "summarize_paper", fake_summary)
+    service.summarize_papers({"survey": sid, "works": ["S0"]})
+    service.summarize_papers({"survey": sid})
+
+    assert seen.count("论文 S0") == 1
+    assert set(seen) == {"论文 S0", "论文 S1", "论文 S2", "论文 S3"}
+
+
+def test_summary_endpoint_rejects_a_milestone_or_too_many_works(tmp_path, monkeypatch):
+    service = GuiService(tmp_path / "p")
+    sid = _survey(service, monkeypatch)
+
+    with pytest.raises(GuiInputError, match="不是这个调研的长尾论文"):
+        service.summarize_papers({"survey": sid, "works": ["FOUNDATION"]})
+    with pytest.raises(GuiInputError, match="一次最多"):
+        service.summarize_papers({"survey": sid, "works": [f"W{i}" for i in range(13)]})
+
+
+def test_legacy_paper_summary_note_still_appears_after_upgrade():
+    from ari.events import Event
+
+    notes = GuiService._ai_notes(
+        [
+            Event(
+                ts="2026-08-30T00:00:00+08:00",
+                type="note",
+                batch="s1",
+                payload={
+                    "kind": "ai_paper_summary",
+                    "work": "W1",
+                    "paper_summary": {"changed": "旧格式也不能丢"},
+                },
+            )
+        ]
+    )
+
+    assert notes["s1"]["summaries"]["W1"] == {"changed": "旧格式也不能丢"}
 
 
 def test_bottleneck_must_be_written_before_asking_ai(tmp_path, monkeypatch):

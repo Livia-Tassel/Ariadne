@@ -2,7 +2,7 @@
 
    **密钥不进项目目录。** config.toml 与 runs.jsonl 都会进 git——把 key
    写进去就等于把它提交进仓库。所以存在应用数据目录，权限 0600。这也更
-   符合事实：key 是你的，不是某个项��的，一次填好所有项目都能用。
+   符合事实：key 是你的，不是某个项目的，一次填好所有项目都能用。
 
    界面永远只拿到掩码，密钥只进不出。
 */
@@ -62,6 +62,34 @@ export async function renderSettings() {
       <div class="err" hidden></div>
     </form>
 
+    <div class="rule-head"><h2>第三方中转</h2><span class="tally">可选，用中转或非官方模型时填</span></div>
+    <p class="seeds pad-y">
+      一次设置，所有项目生效——不用每个项目改一遍 config.toml。
+      这里填写的模型和 Base URL 会覆盖项目配置；清空后才使用项目里的配置或默认值。
+    </p>
+    <form id="relay-form" class="inline-form">
+      <div class="field">
+        <label for="s-reason-model">
+          推理模型<span class="hint">（格式：provider:model，例如 anthropic:claude-opus-5 或 openai:deepseek-v4-pro）</span>
+        </label>
+        <input id="s-reason-model" class="mono" value="${data.reason_model || ""}" placeholder="anthropic:claude-opus-5" />
+      </div>
+      <div class="field">
+        <label for="s-anthropic-url">
+          Anthropic Base URL<span class="hint">（留空则用官方 API）</span>
+        </label>
+        <input id="s-anthropic-url" class="mono" value="${data.anthropic_base_url}" placeholder="https://api.anthropic.com" />
+      </div>
+      <div class="field">
+        <label for="s-openai-url">
+          OpenAI Base URL<span class="hint">（留空则用官方 API）</span>
+        </label>
+        <input id="s-openai-url" class="mono" value="${data.openai_base_url}" placeholder="https://api.openai.com/v1" />
+      </div>
+      <div class="acts left"><button type="submit" class="btn">保存</button></div>
+      <div class="err" hidden></div>
+    </form>
+
     <div class="rule-head"><h2>OpenAlex</h2><span class="tally">领域调研的数据源</span></div>
     <form id="mailto-form" class="inline-form">
       <div class="field">
@@ -103,6 +131,22 @@ function bindSettings() {
     const ok = await submitting(secretForm, async () => {
       await post("/api/settings", { secrets });
       toast("密钥已保存");
+    });
+    if (ok) await renderSettings();
+  };
+
+  const relayForm = $("#relay-form");
+  relayForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const ok = await submitting(relayForm, async () => {
+      await post("/api/settings", {
+        settings: {
+          reason_model: $("#s-reason-model").value,
+          anthropic_base_url: $("#s-anthropic-url").value,
+          openai_base_url: $("#s-openai-url").value,
+        },
+      });
+      toast("已保存");
     });
     if (ok) await renderSettings();
   };

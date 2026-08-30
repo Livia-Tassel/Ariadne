@@ -6,6 +6,8 @@ test_project 与 test_board 都需要造事件序列；构造逻辑放这里，
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ari.events import Event
@@ -15,7 +17,7 @@ RUN = "model=large"
 
 
 @pytest.fixture(autouse=True)
-def _no_real_api_keys(monkeypatch):
+def _no_real_api_keys(monkeypatch, tmp_path):
     """把 provider 的 API key 环境变量从所有测试里摘掉。
 
     spec §9：CI 不打真实 API。config.toml 模板里是真实的模型名，只要开发
@@ -25,6 +27,17 @@ def _no_real_api_keys(monkeypatch):
     """
     for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(name, raising=False)
+
+    # GUI 能把 key / 模型写进用户级 credentials.toml。测试若读到开发机的
+    # 真实文件，会在本应离线的 plan/review 测试里发起真实请求。显式传入路径
+    # 的 credentials 单测仍使用自己的文件；默认路径一律隔离到 tmp_path。
+    from ari import credentials
+
+    monkeypatch.setattr(
+        credentials,
+        "credentials_path",
+        lambda path=None: Path(path) if path is not None else tmp_path / "credentials.toml",
+    )
 
 
 def make_batch_opened(**overrides) -> Event:

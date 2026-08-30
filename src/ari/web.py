@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import mimetypes
+import os
 import re
 import threading
 import traceback
@@ -21,12 +22,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import __version__
 from .advising import advise
 from .beliefs import project_beliefs
 from .drafts import parse_number, parse_prediction
 from .events import Event, append_event, read_events
 from .ideas import make_idea_id, project_ideas
-import os
 
 from .config import load_config
 from .credentials import (
@@ -303,7 +304,14 @@ class GuiService:
         return {"ok": True, "available": True, **box["value"]}
 
     def _ai(
-        self, work, kind: str, *, batch: str, run: str | None = None, extra: dict | None = None
+        self,
+        work,
+        kind: str,
+        *,
+        batch: str,
+        run: str | None = None,
+        extra: dict | None = None,
+        result_key: str | None = None,
     ) -> dict:
         """跑一次 AI 调用并归档。
 
@@ -332,13 +340,14 @@ class GuiService:
         if "value" not in box:
             return {"ok": True, "available": False, "reason": box.get("reason", "这次没有 AI 那一段")}
 
-        payload = {"kind": kind, **(extra or {}), kind.removeprefix("ai_"): box["value"]}
+        output_key = result_key or kind.removeprefix("ai_")
+        payload = {"kind": kind, **(extra or {}), output_key: box["value"]}
         with self._write_lock:
             append_event(
                 self.runs_path,
                 Event(ts=_now(), type="note", batch=batch, run=run, payload=payload),
             )
-        return {"ok": True, "available": True, kind.removeprefix("ai_"): box["value"]}
+        return {"ok": True, "available": True, output_key: box["value"]}
 
     def ask_advice(self, payload: dict) -> dict:
         """锁定预测之后，给一份 AI 的独立判断。只给方向，不给数值。
@@ -655,8 +664,15 @@ class GuiService:
         written = 0
         now = _now()
         with self._write_lock:
+            # 搜索与回表期间另一个窗口可能刚抓过一批；写入前重新读取一次。
+            # 同一篇也可能既在 seed 里，又被选为 milestone。用一份实时集合
+            # 同时挡住并发重复和本批次内部重复，避免后写的 followup 把
+            # milestone 覆盖掉。
+            current_events, _ = read_events(self.runs_path)
+            current_surveys, _ = project_surveys(current_events)
+            known = set((current_surveys.get(survey.id) or survey).papers)
             for paper, tier, count in rows:
-                if paper.work in survey.papers:
+                if paper.work in known:
                     continue
                 append_event(
                     self.runs_path,
@@ -678,10 +694,9 @@ class GuiService:
                         },
                     ),
                 )
+                known.add(paper.work)
                 written += 1
-
-        # 额度进事件流：刷新一次就没了的话，界面上那行数字没有意义。
-        with self._write_lock:
+            # 额度进事件流：刷新一次就没了的话，界面上那行数字没有意义。
             append_event(
                 self.runs_path,
                 Event(
@@ -841,14 +856,42 @@ class GuiService:
         摘要落 note，所以摘要过的论文**不会**因此变成「已读」。
         """
         survey = self._survey_or_404(payload)
-        works = payload.get("works")
-        targets = [
-            p
-            for p in survey.tier(TIER_FOLLOWUP)
-            if (not works or p.work in set(works))
-        ][: self.MAX_SUMMARIES]
+        requested = payload.get("works")
+        requested_works: list[str] | None = None
+        if requested is not None:
+            if not isinstance(requested, list) or not requested:
+                raise GuiInputError("要摘要的论文列表格式不正确")
+            requested_works = []
+            for raw in requested:
+                work = _text(raw, "论文 Work ID")
+                if work not in requested_works:
+                    requested_works.append(work)
+            if len(requested_works) > self.MAX_SUMMARIES:
+                raise GuiInputError(f"一次最多摘要 {self.MAX_SUMMARIES} 篇论文")
+
+        followups = survey.tier(TIER_FOLLOWUP)
+        by_work = {paper.work: paper for paper in followups}
+        if requested_works is not None:
+            unknown = [work for work in requested_works if work not in by_work]
+            if unknown:
+                raise GuiInputError(f"{unknown[0]} 不是这个调研的长尾论文")
+            candidates = [by_work[work] for work in requested_works]
+        else:
+            candidates = followups
+
+        # 摘要 note 不进入 Survey 投影，必须从事件里单独读取。旧实现没有做
+        # 这一步，第二次点批量按钮会重新摘要最前面的 12 篇，永远走不到后面。
+        events, _ = read_events(self.runs_path)
+        existing = (self._ai_notes(events).get(survey.id) or {}).get("summaries") or {}
+        unsummarized = [paper for paper in candidates if paper.work not in existing]
+        missing_abstract = [paper for paper in unsummarized if not paper.abstract.strip()]
+        targets = [paper for paper in unsummarized if paper.abstract.strip()][
+            : self.MAX_SUMMARIES
+        ]
         if not targets:
-            raise GuiInputError("没有需要摘要的论文")
+            if missing_abstract:
+                raise GuiInputError("所选论文没有 OpenAlex 原始摘要，无法生成可靠的 AI 摘要")
+            raise GuiInputError("所选论文已经有 AI 摘要")
 
         titles = [p.title for p in survey.tier(TIER_MILESTONE)]
         done, failed, reason = 0, 0, ""
@@ -858,6 +901,7 @@ class GuiService:
                 "ai_paper_summary",
                 batch=survey.id,
                 extra={"work": paper.work},
+                result_key="summary",
             )
             if result.get("available"):
                 done += 1
@@ -869,6 +913,7 @@ class GuiService:
             "available": done > 0,
             "summarized": done,
             "failed": failed,
+            "skipped_no_abstract": len(missing_abstract),
             "reason": reason,
         }
 
@@ -906,6 +951,7 @@ class GuiService:
     def settings(self, payload: dict | None = None) -> dict:
         """当前设置。**密钥只进不出**——界面永远只拿到掩码。"""
         stored = load_secrets()
+        user_settings = load_settings()
         rows = []
         for env in self._key_envs():
             from_env = bool(os.environ.get(env))
@@ -923,6 +969,9 @@ class GuiService:
             "ok": True,
             "secrets": rows,
             "openalex_mailto": self._mailto(),
+            "reason_model": user_settings.get("reason_model", ""),
+            "anthropic_base_url": user_settings.get("anthropic_base_url", ""),
+            "openai_base_url": user_settings.get("openai_base_url", ""),
             "store": str(credentials_path()),
         }
 
@@ -939,9 +988,10 @@ class GuiService:
                 raise GuiInputError(f"未知的环境变量名 {env}")
             secrets[env] = str(value or "").strip()
 
+        allowed_settings = {"openalex_mailto", "reason_model", "anthropic_base_url", "openai_base_url"}
         settings = {}
         for name, value in (raw_settings or {}).items():
-            if name != "openalex_mailto":
+            if name not in allowed_settings:
                 raise GuiInputError(f"未知的设置项 {name}")
             settings[name] = str(value or "").strip()
 
@@ -1096,7 +1146,10 @@ class GuiService:
             elif kind == "ai_paper_summary":
                 # 摘要落 note，而所有投影都跳过 note——「已读」在数据层面
                 # 就不可能被 AI 写入。见 v0.5 spec §6。
-                slot["summaries"][event.payload.get("work") or ""] = event.payload.get("summary")
+                # 早期版本误写成 paper_summary；读取时兼容，避免用户已经付费
+                # 生成的内容因为升级而消失。
+                summary = event.payload.get("summary") or event.payload.get("paper_summary")
+                slot["summaries"][event.payload.get("work") or ""] = summary
             elif kind == "ai_bottleneck":
                 slot["bottleneck"] = event.payload.get("bottleneck")
             elif event.run:
@@ -1746,7 +1799,7 @@ def _handler_for(service: GuiService, allowed_hosts=()):
     hosts = {"127.0.0.1", "localhost", "::1", *allowed_hosts}
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "Ariadne/0.2"
+        server_version = f"Ariadne/{__version__}"
 
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
             if not self._host_allowed():

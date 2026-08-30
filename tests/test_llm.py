@@ -107,6 +107,8 @@ from pathlib import Path
 
 from ari.llm import complete
 from ari.llm.claude import extract_text as claude_text
+from ari.llm.gpt import _status_detail as gpt_status_detail
+from ari.llm.gpt import build_request as build_gpt_request
 from ari.llm.gpt import extract_text as gpt_text
 
 FIXTURES = Path(__file__).parent / "fixtures" / "llm"
@@ -185,6 +187,44 @@ def test_gpt_response_with_null_content_is_unavailable():
 def test_gpt_response_without_choices_is_unavailable():
     with pytest.raises(LLMUnavailable):
         gpt_text(type("Response", (), {"choices": []})())
+
+
+def test_official_openai_uses_developer_and_strict_json_schema():
+    from ari.config import ModelRef
+
+    request = build_gpt_request(
+        ModelRef("openai", "gpt-test", "https://api.openai.com/v1", "sk-test"),
+        "system",
+        "user",
+        SCHEMA,
+    )
+
+    assert request["messages"][0]["role"] == "developer"
+    assert request["response_format"]["type"] == "json_schema"
+    assert request["response_format"]["json_schema"]["strict"] is True
+
+
+def test_compatible_endpoint_uses_system_and_json_object():
+    from ari.config import ModelRef
+
+    request = build_gpt_request(
+        ModelRef("openai", "deepseek-v4-pro", "https://api.deepseek.com", "sk-test"),
+        "system",
+        "user",
+        SCHEMA,
+    )
+
+    assert request["messages"][0]["role"] == "system"
+    assert "JSON Schema" in request["messages"][0]["content"]
+    assert request["response_format"] == {"type": "json_object"}
+
+
+def test_gpt_status_detail_handles_openai_and_compatible_error_shapes():
+    compatible = type("Error", (), {"body": {"message": "unknown role developer"}})()
+    official = type("Error", (), {"body": {"error": {"message": "schema invalid"}}})()
+
+    assert gpt_status_detail(compatible) == "unknown role developer"
+    assert gpt_status_detail(official) == "schema invalid"
 
 
 def test_both_fixtures_survive_the_full_parse():

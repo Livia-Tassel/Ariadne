@@ -687,10 +687,11 @@ table.ledger td input { padding: 4px 7px; font-size: 13.5px; }
 
 /* ---------- 调研 ---------- */
 
-.entry.paper { grid-template-columns: 74px minmax(0, 1fr) 62px; align-items: baseline; }
+.entry.paper { grid-template-columns: 74px minmax(0, 1fr) 92px; align-items: baseline; }
 .entry.paper .eid { font-size: 12px; }
 .entry.paper .txt b { font-weight: 600; }
 .entry.paper .txt small { color: var(--ink-3); }
+.entry.paper .st { text-align: right; }
 .entry.paper.done { color: var(--ink-2); }
 /* 「我拿走的」与「AI 摘要」在视觉上必须一眼分开——前者是你读的，后者不是。 */
 .entry .took {

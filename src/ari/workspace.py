@@ -12,7 +12,7 @@ CONFIG_TEMPLATE = """\
 # ari 的每一条命令都照常工作，只是没有 AI 那一段。
 
 [providers.openai]
-base_url = "https://api.openai.com/v1"
+base_url = "https://api.deepseek.com"
 api_key_env = "OPENAI_API_KEY"
 
 [providers.anthropic]
@@ -21,8 +21,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 [roles]
 # 复盘追问与 plan 阶段的定性判断。
-# Anthropic 侧使用 adaptive thinking，需要 Claude 4.6 及以上的模型。
-reason = "anthropic:claude-opus-5"
+reason = "openai:deepseek-v4-pro"
 # 日志抽取，v0.2 未启用（见 spec §5.3）
 # extract = "openai:gpt-5.5"
 
